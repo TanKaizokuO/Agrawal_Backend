@@ -1,0 +1,91 @@
+// ---------------------------------------------------------------------------
+// Events module — events, signed passes, gate devices and admissions.
+// ---------------------------------------------------------------------------
+
+model Event {
+  id            String       @id @map("id")
+  title         String       @map("title")
+  titleHi       String?      @map("title_hi")
+  description   String?      @map("description")
+  descriptionHi String?      @map("description_hi")
+  venue         String       @map("venue")
+  venueCity     String       @map("venue_city")
+  startsAt      DateTime     @map("starts_at") @db.Timestamptz(6)
+  endsAt        DateTime     @map("ends_at") @db.Timestamptz(6)
+  createdBy     String       @map("created_by")
+  status        EventStatus  @default(UPCOMING) @map("status")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  passes        EventPass[]
+  gateDevices   GateDevice[]
+
+  @@index([status, startsAt], map: "event_status_starts_at_idx")
+  @@map("event")
+  @@schema("public")
+}
+
+enum EventStatus {
+  UPCOMING
+  ONGOING
+  ENDED
+  CANCELLED
+
+  @@schema("public")
+}
+
+model EventPass {
+  id            String      @id @map("id")
+  eventId       String      @map("event_id")
+  event         Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  memberId      String      @map("member_id")
+  familyId      String      @map("family_id")
+  isHead        Boolean     @map("is_head")
+  minorsCount   Int         @default(0) @map("minors_count")
+  status        PassStatus  @default(ACTIVE) @map("status")
+  qrPayload     String      @map("qr_payload")
+  issuedAt      DateTime    @default(now()) @map("issued_at") @db.Timestamptz(6)
+  revokedAt     DateTime?   @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String?     @map("revoked_reason")
+  admissions    Admission[]
+
+  @@unique([eventId, memberId], map: "event_pass_event_member_key")
+  @@index([memberId], map: "event_pass_member_id_idx")
+  @@index([eventId, status], map: "event_pass_event_status_idx")
+  @@map("event_pass")
+  @@schema("public")
+}
+
+enum PassStatus {
+  ACTIVE
+  REVOKED
+
+  @@schema("public")
+}
+
+model Admission {
+  id             String    @id @map("id")
+  passId         String    @map("pass_id")
+  pass           EventPass @relation(fields: [passId], references: [id], onDelete: Cascade)
+  gateDeviceId   String    @map("gate_device_id")
+  scannedAt      DateTime  @map("scanned_at") @db.Timestamptz(6)
+  scannedOffline Boolean   @default(false) @map("scanned_offline")
+
+  @@unique([passId, gateDeviceId, scannedAt], map: "admission_pass_gate_scanned_key")
+  @@index([passId], map: "admission_pass_id_idx")
+  @@index([gateDeviceId, scannedAt], map: "admission_gate_scanned_at_idx")
+  @@map("admission")
+  @@schema("public")
+}
+
+model GateDevice {
+  id           String   @id @map("id")
+  eventId      String   @map("event_id")
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  label        String   @map("label")
+  registeredBy String   @map("registered_by")
+  registeredAt DateTime @default(now()) @map("registered_at") @db.Timestamptz(6)
+
+  @@index([eventId], map: "gate_device_event_id_idx")
+  @@index([registeredBy, eventId], map: "gate_device_registered_by_event_idx")
+  @@map("gate_device")
+  @@schema("public")
+}

@@ -1,0 +1,122 @@
+// ---------------------------------------------------------------------------
+// Notices module — community boards (Shok Sandesh & Business Listings),
+// reports, suspensions, and archival requests.
+// ---------------------------------------------------------------------------
+
+model Notice {
+  id             String       @id @map("id")
+  board          NoticeBoard  @map("board")
+  authorMemberId String       @map("author_member_id")
+  authorFamilyId String       @map("author_family_id")
+  status         NoticeStatus @default(ACTIVE) @map("status")
+  title          String?      @map("title")
+  bodyHi         String?      @map("body_hi")
+  bodyEn         String?      @map("body_en")
+  linkedMemberId String?      @map("linked_member_id")
+  imageId        String?      @map("image_id")
+  metadata       Json?        @map("metadata")
+  paymentId      String?      @map("payment_id")
+  publishedAt    DateTime?    @map("published_at") @db.Timestamptz(6)
+  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz(6)
+  hiddenAt       DateTime?    @map("hidden_at") @db.Timestamptz(6)
+  hiddenReason   String?      @map("hidden_reason")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  reports        Report[]
+
+  @@index([board, status, publishedAt], map: "notice_board_status_published_idx")
+  @@index([authorMemberId], map: "notice_author_member_idx")
+  @@index([authorFamilyId], map: "notice_author_family_idx")
+  @@index([linkedMemberId], map: "notice_linked_member_idx")
+  @@map("notice")
+  @@schema("public")
+}
+
+enum NoticeBoard {
+  SHOK_SANDESH
+  BUSINESS_LISTING
+
+  @@schema("public")
+}
+
+enum NoticeStatus {
+  DRAFT
+  ACTIVE
+  HIDDEN
+  EXPIRED
+  REMOVED
+
+  @@schema("public")
+}
+
+model BusinessListingMeta {
+  noticeId        String  @id @map("notice_id")
+  category        String  @map("category")
+  businessCity    String  @map("business_city")
+  businessCityKey String  @map("business_city_key")
+  businessPhone   String  @map("business_phone")
+  businessAddress String? @map("business_address")
+
+  @@index([category, businessCityKey], map: "business_listing_meta_category_city_idx")
+  @@map("business_listing_meta")
+  @@schema("public")
+}
+
+model ArchivalRequest {
+  id               String                @id @map("id")
+  noticeMemberId   String?               @map("notice_member_id")
+  deceasedMemberId String                @map("deceased_member_id")
+  familyId         String                @map("family_id")
+  status           ArchivalRequestStatus @default(OPEN) @map("status")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  respondedAt      DateTime?             @map("responded_at") @db.Timestamptz(6)
+  respondedBy      String?               @map("responded_by")
+  escalatedAt      DateTime?             @map("escalated_at") @db.Timestamptz(6)
+  expiresAt        DateTime              @map("expires_at") @db.Timestamptz(6)
+
+  @@index([deceasedMemberId], map: "archival_request_deceased_member_idx")
+  @@index([status, expiresAt], map: "archival_request_status_expires_idx")
+  @@map("archival_request")
+  @@schema("public")
+}
+
+enum ArchivalRequestStatus {
+  OPEN
+  CONFIRMED
+  REFUTED
+  ESCALATED
+
+  @@schema("public")
+}
+
+model Report {
+  id               String   @id @map("id")
+  targetType       String   @map("target_type")
+  targetId         String   @map("target_id")
+  noticeId         String?  @map("notice_id")
+  notice           Notice?  @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+  reporterMemberId String   @map("reporter_member_id")
+  reporterFamilyId String   @map("reporter_family_id")
+  reason           String   @map("reason")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([targetId, reporterMemberId], map: "report_target_reporter_key")
+  @@index([targetId, reporterFamilyId], map: "report_target_family_idx")
+  @@map("report")
+  @@schema("public")
+}
+
+model Suspension {
+  id             String    @id @map("id")
+  memberId       String    @map("member_id")
+  reason         String    @map("reason")
+  activeNoticeId String?   @map("active_notice_id")
+  startsAt       DateTime  @default(now()) @map("starts_at") @db.Timestamptz(6)
+  endsAt         DateTime  @map("ends_at") @db.Timestamptz(6)
+  liftedAt       DateTime? @map("lifted_at") @db.Timestamptz(6)
+  liftedBy       String?   @map("lifted_by")
+  liftedReason   String?   @map("lifted_reason")
+
+  @@index([memberId, endsAt], map: "suspension_member_ends_idx")
+  @@map("suspension")
+  @@schema("public")
+}

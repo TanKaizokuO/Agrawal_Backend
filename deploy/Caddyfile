@@ -1,0 +1,68 @@
+# apps/api/deploy/Caddyfile
+# Reverse proxy and automatic TLS termination for Agrawal Samaj API
+# Reference: docs/backend/architecture.md
+#
+# Environment variables consumed:
+#   DOMAIN: Registered base domain (see docs/backend/open-questions.md)
+#   STAGING_API_HOST: Hostname for staging API (default: staging-api.{$DOMAIN})
+#   PROD_API_HOST: Hostname for production API (default: api.{$DOMAIN})
+#   ACME_EMAIL: Operator contact email for ACME certificate issuance
+#   STAGING_UPSTREAM: Upstream target for staging container (default: 127.0.0.1:3001)
+#   PROD_UPSTREAM: Upstream target for production container (default: 127.0.0.1:3000)
+
+{
+    email {$ACME_EMAIL:admin@{$DOMAIN}}
+    admin off
+    log {
+        output stdout
+        format json
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Staging API endpoint (staging-api.<domain>)
+# ------------------------------------------------------------------------------
+{$STAGING_API_HOST:staging-api.{$DOMAIN}} {
+    encode gzip zstd
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Reverse proxy to staging container (localhost port 3001)
+    reverse_proxy {$STAGING_UPSTREAM:127.0.0.1:3001} {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Production API endpoint (api.<domain>)
+# ------------------------------------------------------------------------------
+{$PROD_API_HOST:api.{$DOMAIN}} {
+    encode gzip zstd
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Reverse proxy to production container (localhost port 3000)
+    reverse_proxy {$PROD_UPSTREAM:127.0.0.1:3000} {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

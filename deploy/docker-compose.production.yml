@@ -1,0 +1,48 @@
+# apps/api/deploy/docker-compose.production.yml
+# Docker Compose stack for api-prod on shared EC2 t3.small
+# Reference: docs/backend/architecture.md
+
+services:
+  api-prod:
+    image: ${IMAGE_URI}
+    container_name: agrawal-api-prod
+    restart: unless-stopped
+    # Environment variables and secrets prepared from AWS SSM Parameter Store
+    env_file:
+      - .env.production
+    ports:
+      # Bound to loopback interface on port 3000; Caddy terminates TLS and proxies here
+      - "127.0.0.1:${PROD_PORT:-3000}:3000"
+    logging:
+      driver: ${LOG_DRIVER:-json-file}
+      options:
+        max-size: "50m"
+        max-file: "10"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  migration-prod:
+    image: ${IMAGE_URI}
+    container_name: agrawal-api-prod-migration
+    profiles:
+      - migration
+    restart: "no"
+    env_file:
+      - .env.production
+    command:
+      - npx
+      - prisma
+      - migrate
+      - deploy
+      - --schema
+      - prisma/schema
+      - --config
+      - prisma.config.ts

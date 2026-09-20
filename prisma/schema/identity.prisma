@@ -1,0 +1,50 @@
+/// An opaque session issued after Firebase phone-token exchange.
+model Session {
+  id             String        @id @db.Uuid
+  tokenHash      String        @unique @map("token_hash")
+  client         SessionClient
+  phoneE164      String        @map("phone_e164")
+  memberId       String?       @map("member_id") @db.Uuid
+  registrationId String?       @map("registration_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime      @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt      DateTime      @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz(6)
+  revokedReason  String?       @map("revoked_reason")
+  userAgent      String?       @map("user_agent")
+
+  @@index([memberId])
+  @@index([phoneE164])
+  @@index([registrationId])
+  @@map("session")
+  @@schema("public")
+}
+
+enum SessionClient {
+  WEB
+  MOBILE
+
+  @@map("session_client")
+  @@schema("public")
+}
+
+/// A role granted to a Member. Read on every authenticated request.
+model MemberRole {
+  memberId  String   @map("member_id") @db.Uuid
+  role      Role
+  grantedBy String?  @map("granted_by") @db.Uuid
+  grantedAt DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  @@id([memberId, role])
+  @@map("member_role")
+  @@schema("public")
+}
+
+enum Role {
+  OFFICER
+  OPERATOR
+  ORGANISER
+
+  @@map("role")
+  @@schema("public")
+}

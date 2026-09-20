@@ -1,0 +1,99 @@
+// ---------------------------------------------------------------------------
+// Blood SOS module — urgent donor requests, alerts, responses and preferences.
+// ---------------------------------------------------------------------------
+
+model BloodSosRequest {
+  id                String             @id @map("id")
+  requesterMemberId String             @map("requester_member_id")
+  status            SosStatus          @default(ACTIVE) @map("status")
+  bloodGroup        BloodGroup         @map("blood_group")
+  hospitalName      String             @map("hospital_name")
+  hospitalPincode   String             @map("hospital_pincode")
+  hospitalCity      String             @map("hospital_city")
+  hospitalCityKey   String             @map("hospital_city_key")
+  hospitalDistrict  String?            @map("hospital_district")
+  hospitalState     String             @map("hospital_state")
+  placeSource       SosPlaceSource     @map("place_source")
+  patientName       String?            @map("patient_name")
+  unitsNeeded       Int?               @map("units_needed")
+  note              String?            @map("note")
+  currentTier       Int                @default(1) @map("current_tier")
+  donorReachTotal   Int                @default(0) @map("donor_reach_total")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt         DateTime           @map("expires_at") @db.Timestamptz(6)
+  fulfilledAt       DateTime?          @map("fulfilled_at") @db.Timestamptz(6)
+  closedAt          DateTime?          @map("closed_at") @db.Timestamptz(6)
+  closedBy          String?            @map("closed_by")
+  closedReason      String?            @map("closed_reason")
+  alerts            BloodSosAlert[]
+  responses         BloodSosResponse[]
+
+  @@index([requesterMemberId], map: "blood_sos_request_requester_idx")
+  @@index([status, expiresAt], map: "blood_sos_request_status_expires_idx")
+  @@map("blood_sos_request")
+  @@schema("public")
+}
+
+enum SosStatus {
+  ACTIVE
+  CLOSED
+
+  @@schema("public")
+}
+
+enum SosPlaceSource {
+  PINCODE
+  REQUESTER
+
+  @@schema("public")
+}
+
+model BloodSosAlert {
+  id              String          @id @map("id")
+  requestId       String          @map("request_id")
+  request         BloodSosRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  tier            Int             @map("tier")
+  donorMemberId   String          @map("donor_member_id")
+  bloodGroupMatch Boolean         @map("blood_group_match")
+  accepted        Boolean         @map("accepted")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([requestId, donorMemberId], map: "blood_sos_alert_request_donor_key")
+  @@index([donorMemberId], map: "blood_sos_alert_donor_idx")
+  @@map("blood_sos_alert")
+  @@schema("public")
+}
+
+model BloodSosResponse {
+  id            String          @id @map("id")
+  requestId     String          @map("request_id")
+  request       BloodSosRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  donorMemberId String          @map("donor_member_id")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([requestId, donorMemberId], map: "blood_sos_response_request_donor_key")
+  @@index([donorMemberId], map: "blood_sos_response_donor_idx")
+  @@map("blood_sos_response")
+  @@schema("public")
+}
+
+model DonorPreference {
+  memberId      String    @id @map("member_id")
+  snoozedAt     DateTime? @map("snoozed_at") @db.Timestamptz(6)
+  snoozeUntil   DateTime? @map("snooze_until") @db.Timestamptz(6)
+  lastDonatedOn DateTime? @map("last_donated_on") @db.Date
+
+  @@index([snoozeUntil], map: "donor_preference_snooze_until_idx")
+  @@map("donor_preference")
+  @@schema("public")
+}
+
+model DonorAlertDay {
+  memberId String   @map("member_id")
+  dayIst   DateTime @map("day_ist") @db.Date
+  count    Int      @default(0) @map("count")
+
+  @@id([memberId, dayIst], map: "donor_alert_day_pkey")
+  @@map("donor_alert_day")
+  @@schema("public")
+}

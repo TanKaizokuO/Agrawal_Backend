@@ -1,0 +1,58 @@
+// ---------------------------------------------------------------------------
+// Officer module — append-only processing records and governed flags.
+// Raw SQL protects ProcessingRecord from application mutation; see officer.sql.
+// ---------------------------------------------------------------------------
+
+model ProcessingRecord {
+  id          String   @id @map("id")
+  at          DateTime @default(now()) @map("at") @db.Timestamptz(6)
+  actorKind   String   @map("actor_kind")
+  actorId     String?  @map("actor_id")
+  action      String   @map("action")
+  subjectType String   @map("subject_type")
+  subjectId   String   @map("subject_id")
+  reason      String?  @map("reason")
+  metadata    Json?    @map("metadata")
+  retainUntil DateTime @map("retain_until") @db.Timestamptz(6)
+
+  @@index([subjectType, subjectId], map: "processing_record_subject_idx")
+  @@index([actorId, at], map: "processing_record_actor_at_idx")
+  @@index([retainUntil], map: "processing_record_retain_idx")
+  @@map("processing_record")
+  @@schema("public")
+}
+
+model Flag {
+  id          String     @id @map("id")
+  kind        FlagKind
+  status      FlagStatus @default(OPEN)
+  subjectType String     @map("subject_type")
+  subjectId   String     @map("subject_id")
+  relatedIds  Json?      @map("related_ids")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt  DateTime?  @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy  String?    @map("resolved_by")
+  resolution  String?
+  note        String?
+
+  @@index([status, createdAt], map: "flag_status_created_idx")
+  @@index([subjectType, subjectId], map: "flag_subject_idx")
+  @@map("flag")
+  @@schema("public")
+}
+
+enum FlagKind {
+  NO_PAYMENT_IDENTITY
+  POSSIBLE_DUPLICATE_PERSON
+  SHARED_ADDRESS
+  JOINER_PAYS_FROM_OTHER_HEAD
+
+  @@schema("public")
+}
+
+enum FlagStatus {
+  OPEN
+  RESOLVED
+
+  @@schema("public")
+}

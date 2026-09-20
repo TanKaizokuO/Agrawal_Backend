@@ -1,0 +1,55 @@
+{
+  "name": "@agrawal-samaj/api",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "openapi": "tsx src/openapi/generate.ts",
+    "prisma:generate": "prisma generate --schema prisma/schema",
+    "prisma:migrate": "prisma migrate deploy --schema prisma/schema",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@asteasolutions/zod-to-openapi": "9.1.0",
+    "@aws-sdk/client-s3": "3.1136.0",
+    "@aws-sdk/s3-request-presigner": "3.1136.0",
+    "@google-cloud/translate": "10.1.0",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "cors": "2.8.6",
+    "dotenv": "17.4.2",
+    "express": "5.2.1",
+    "firebase-admin": "14.4.0",
+    "helmet": "8.3.0",
+    "pg": "8.23.0",
+    "pg-boss": "12.33.2",
+    "pino": "10.3.1",
+    "pino-http": "11.0.0",
+    "prisma": "7.10.0",
+    "razorpay": "2.9.8",
+    "sharp": "0.35.4",
+    "uuid": "14.0.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.21.0",
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.2",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "eslint": "9.21.0",
+    "supertest": "7.2.2",
+    "tsx": "4.23.13",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.1"
+  }
+}

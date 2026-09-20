@@ -1,0 +1,74 @@
+// ---------------------------------------------------------------------------
+// Registration module — Applicant lifecycle and Family-ID minting.
+// ---------------------------------------------------------------------------
+
+model Registration {
+  id                 String                    @id @db.Uuid
+  phoneE164          String                    @map("phone_e164")
+  status             RegistrationStatus        @default(STARTED)
+  route              RegistrationRoute?
+  foundingKind       RegistrationFoundingKind? @map("founding_kind")
+  joinFamilyId       String?                   @map("join_family_id")
+  joinFamilyPublicId String?                   @map("join_family_public_id")
+  submittedProfile   Json?                     @map("submitted_profile")
+  paymentId          String?                   @map("payment_id")
+  completedMemberId  String?                   @map("completed_member_id") @db.Uuid
+  lastActivityAt     DateTime                  @default(now()) @map("last_activity_at") @db.Timestamptz(6)
+  submittedAt        DateTime?                 @map("submitted_at") @db.Timestamptz(6)
+  expiresAt          DateTime?                 @map("expires_at") @db.Timestamptz(6)
+  endedAt            DateTime?                 @map("ended_at") @db.Timestamptz(6)
+  endReason          String?                   @map("end_reason")
+  declineReason      String?                   @map("decline_reason")
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([phoneE164, status], map: "registration_phone_status_idx")
+  @@index([joinFamilyId, status], map: "registration_join_family_status_idx")
+  @@index([status, lastActivityAt], map: "registration_status_activity_idx")
+  @@map("registration")
+  @@schema("public")
+}
+
+enum RegistrationStatus {
+  STARTED
+  PAID
+  AWAITING_HEAD
+  COMPLETED
+  ABANDONED
+  CANCELLED
+  DECLINED
+  EXPIRED
+
+  @@schema("public")
+}
+
+enum RegistrationRoute {
+  INDIVIDUAL
+  CREATE
+  JOIN
+
+  @@schema("public")
+}
+
+enum RegistrationFoundingKind {
+  INDIVIDUAL
+  CREATE
+
+  @@schema("public")
+}
+
+model FamilyIdCounter {
+  pincode String @id
+  nextSeq Int    @map("next_seq")
+
+  @@map("family_id_counter")
+  @@schema("public")
+}
+
+model RomanizationCache {
+  textHash  String   @id @map("text_hash")
+  latin     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("romanization_cache")
+  @@schema("public")
+}

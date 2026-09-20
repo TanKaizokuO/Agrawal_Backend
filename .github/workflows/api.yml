@@ -1,0 +1,207 @@
+name: API CI/CD
+
+'on':
+  push:
+    branches:
+      - main
+    tags:
+      - 'api-v*'
+    paths:
+      - '**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: Build, Lint, Test & OpenAPI Drift Check
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+      DATABASE_MIGRATION_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agrawal_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agrawal_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup PostgreSQL test extensions
+        run: |
+          PGPASSWORD=postgres_test_password psql -h 127.0.0.1 -U postgres -d agrawal_test -c 'CREATE EXTENSION IF NOT EXISTS "pg_trgm"; CREATE EXTENSION IF NOT EXISTS "citext";'
+
+      - name: Generate Prisma Client
+        env:
+          DATABASE_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+          DATABASE_MIGRATION_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+        run: npm run prisma:generate
+
+      - name: Run Prisma migrations (test database)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+          DATABASE_MIGRATION_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+        run: npm run prisma:migrate
+      - name: Typecheck API
+        run: npm run typecheck
+
+      - name: Lint API
+        run: npm run lint
+
+      - name: Run API tests
+        env:
+          NODE_ENV: test
+          APP_ENV: local
+          DATABASE_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+          DATABASE_MIGRATION_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+          WEB_ORIGINS: http://localhost:5173
+          REGISTRATION_PAYMENT_PAISE: 100
+          BUSINESS_LISTING_FEE_PAISE: 4900
+          PAYMENT_IDENTITY_HMAC_KEY: dGVzdC1obWFjLWtleS0zMi1ieXRlcy1sb25nLXZhbHVlCg==
+          IMAGE_SCREENING_ENABLED: false
+          WORKERS_ENABLED: false
+        run: npm run test
+
+      - name: Check OpenAPI specification drift
+        run: |
+          npm run openapi
+          git diff --exit-code openapi.json
+
+  deploy-staging:
+    name: Deploy to Staging (AWS SSM)
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push staging image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_STAGING || 'agrawal-api-staging' }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_STAGING || 'agrawal-api-staging' }}:staging-latest
+
+      - name: Execute Staging Deployment via SSM
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+          SSM_INSTANCE_ID: ${{ secrets.STAGING_EC2_INSTANCE_ID }}
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_STAGING || 'agrawal-api-staging' }}:${{ github.sha }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${SSM_INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy API staging commit ${GITHUB_SHA}" \
+            --parameters commands="[
+              \"/opt/agrawal/deploy/deploy.sh staging ${IMAGE_URI}\"
+            ]" \
+            --query "Command.CommandId" \
+            --output text \
+            --region "${AWS_REGION}")
+
+          echo "SSM Command dispatched: ${COMMAND_ID}. Awaiting execution..."
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${SSM_INSTANCE_ID}" \
+            --region "${AWS_REGION}"
+
+  deploy-production:
+    name: Deploy to Production (AWS SSM)
+    needs: ci
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/api-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_PROD || 'agrawal-api-prod' }}:${{ github.ref_name }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_PROD || 'agrawal-api-prod' }}:prod-latest
+
+      - name: Execute Production Deployment via SSM
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+          SSM_INSTANCE_ID: ${{ secrets.PROD_EC2_INSTANCE_ID }}
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_PROD || 'agrawal-api-prod' }}:${{ github.ref_name }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${SSM_INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy API production tag ${GITHUB_REF_NAME}" \
+            --parameters commands="[
+              \"/opt/agrawal/deploy/deploy.sh production ${IMAGE_URI}\"
+            ]" \
+            --query "Command.CommandId" \
+            --output text \
+            --region "${AWS_REGION}")
+
+          echo "SSM Command dispatched: ${COMMAND_ID}. Awaiting execution..."
+          aws ssm wait command-executed \
+            --command-id "${COMMAND_ID}" \
+            --instance-id "${SSM_INSTANCE_ID}" \
+            --region "${AWS_REGION}"

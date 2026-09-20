@@ -1,0 +1,41 @@
+# Local development environment for Agrawal backend (apps/api)
+# As specified in docs/backend/architecture.md, local compose exposes PostgreSQL 16 ONLY.
+# The Node.js API runs locally on the host machine against this database.
+#
+# Connection URLs:
+#   App Role (restricted grants for running API):
+#     DATABASE_URL="postgresql://${APP_DB_USER:-agrawal_app}:${APP_DB_PASSWORD:-agrawal_app_dev_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-agrawal_dev}?schema=public"
+#
+#   Migration / Owner Role (full owner grants for Prisma migrations):
+#     DATABASE_MIGRATION_URL="postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_dev_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-agrawal_dev}?schema=public"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agrawal-postgres-local
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agrawal_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_password}
+      APP_DB_USER: ${APP_DB_USER:-agrawal_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-agrawal_app_dev_password}
+    ports:
+      # Expose only Postgres on 127.0.0.1 to avoid public host exposure
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+    healthcheck:
+      # Deterministic readiness check: verifies PostgreSQL accepts connections on target database
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-agrawal_dev} -h 127.0.0.1"
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  postgres_data:
+    name: agrawal_postgres_local_data

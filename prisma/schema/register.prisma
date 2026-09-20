@@ -1,0 +1,265 @@
+// ---------------------------------------------------------------------------
+// Register module — Prisma schema
+// Owns: Family, Member, FamilyLink, ConsentEvent, ErasureRequest,
+//       OfficerMessage, Invite, PincodeCache
+// Restricted-schema tables live in prisma/sql/register.sql (raw SQL only).
+// ---------------------------------------------------------------------------
+
+model Family {
+  id              String       @id @map("id")
+  publicId        String       @unique @map("public_id")
+  gotra           Gotra        @map("gotra")
+  pincodeSnapshot String       @map("pincode_snapshot")
+  headMemberId    String?      @unique @map("head_member_id")
+  status          FamilyStatus @default(ACTIVE) @map("status")
+  photoImageId    String?      @map("photo_image_id")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt      DateTime?    @map("archived_at") @db.Timestamptz(6)
+  links           FamilyLink[]
+
+  @@map("family")
+  @@schema("public")
+}
+
+enum FamilyStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@schema("public")
+}
+
+model Member {
+  id                     String          @id @map("id")
+  phoneE164              String          @unique @map("phone_e164")
+  status                 MemberStatus    @default(ACTIVE) @map("status")
+  nameEn                 String?         @map("name_en")
+  nameHi                 String?         @map("name_hi")
+  nameEnSearchKey        String?         @map("name_en_search_key")
+  fatherNameEn           String?         @map("father_name_en")
+  fatherNameHi           String?         @map("father_name_hi")
+  fatherNameEnSearchKey  String?         @map("father_name_en_search_key")
+  gender                 Gender          @map("gender")
+  dateOfBirth            DateTime        @map("date_of_birth") @db.Date
+  bloodGroup             BloodGroup      @map("blood_group")
+  addressLine1           String          @map("address_line_1")
+  addressLine2           String?         @map("address_line_2")
+  city                   String          @map("city")
+  cityKey                String          @map("city_key")
+  district               String?         @map("district")
+  state                  IndianState     @map("state")
+  pincode                String          @map("pincode")
+  nativePlaceKind        NativePlaceKind @map("native_place_kind")
+  nativePlaceId          String?         @map("native_place_id")
+  nativePlaceText        String?         @map("native_place_text")
+  kuldevi                String?         @map("kuldevi")
+  kuldevta               String?         @map("kuldevta")
+  photoImageId           String?         @map("photo_image_id")
+  nomineeMemberId        String?         @map("nominee_member_id")
+  nomineePromptPending   Boolean         @default(false) @map("nominee_prompt_pending")
+  consentDirectory       Boolean         @default(true) @map("consent_directory")
+  consentBloodGroup      Boolean         @map("consent_blood_group")
+  consentPhoto           Boolean         @map("consent_photo")
+  paymentDisclosureAckAt DateTime        @map("payment_disclosure_ack_at") @db.Timestamptz(6)
+  uiLanguage             String          @default("en") @map("ui_language")
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt             DateTime?       @map("archived_at") @db.Timestamptz(6)
+  archivedBy             String?         @map("archived_by")
+  link                   FamilyLink?
+
+  @@index([status, cityKey], map: "member_status_city_key_idx")
+  @@index([status, state, district], map: "member_status_state_district_idx")
+  @@map("member")
+  @@schema("public")
+}
+
+enum MemberStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@schema("public")
+}
+
+enum Gender {
+  FEMALE
+  MALE
+  OTHER
+
+  @@schema("public")
+}
+
+enum BloodGroup {
+  A_POS
+  A_NEG
+  B_POS
+  B_NEG
+  AB_POS
+  AB_NEG
+  O_POS
+  O_NEG
+
+  @@schema("public")
+}
+
+enum NativePlaceKind {
+  LISTED
+  OTHER
+  UNKNOWN
+
+  @@schema("public")
+}
+
+enum Gotra {
+  GARG
+  GOYAL
+  GOYAN
+  BANSAL
+  KANSAL
+  SINGHAL
+  JINDAL
+  TINGAL
+  MOHAN
+  DHARAN
+  MADHUKUL
+  BINDAL
+  MITTAL
+  TAYAL
+  MANGAL
+  AIRAN
+  NANGAL
+  KUCHHAL
+
+  @@schema("public")
+}
+
+// All 28 states and 8 union territories, SCREAMING_SNAKE_CASE.
+enum IndianState {
+  ANDHRA_PRADESH
+  ARUNACHAL_PRADESH
+  ASSAM
+  BIHAR
+  CHHATTISGARH
+  GOA
+  GUJARAT
+  HARYANA
+  HIMACHAL_PRADESH
+  JHARKHAND
+  KARNATAKA
+  KERALA
+  MADHYA_PRADESH
+  MAHARASHTRA
+  MANIPUR
+  MEGHALAYA
+  MIZORAM
+  NAGALAND
+  ODISHA
+  PUNJAB
+  RAJASTHAN
+  SIKKIM
+  TAMIL_NADU
+  TELANGANA
+  TRIPURA
+  UTTAR_PRADESH
+  UTTARAKHAND
+  WEST_BENGAL
+  ANDAMAN_AND_NICOBAR_ISLANDS
+  CHANDIGARH
+  DADRA_AND_NAGAR_HAVELI_AND_DAMAN_AND_DIU
+  DELHI
+  JAMMU_AND_KASHMIR
+  LADAKH
+  LAKSHADWEEP
+  PUDUCHERRY
+
+  @@schema("public")
+}
+
+model FamilyLink {
+  memberId  String   @id @map("member_id")
+  member    Member   @relation(fields: [memberId], references: [id])
+  familyId  String   @map("family_id")
+  family    Family   @relation(fields: [familyId], references: [id])
+  kind      LinkKind @default(BIRTH) @map("kind")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([familyId], map: "family_link_family_id_idx")
+  @@map("family_link")
+  @@schema("public")
+}
+
+enum LinkKind {
+  BIRTH
+
+  @@schema("public")
+}
+
+model ConsentEvent {
+  id       String        @id @map("id")
+  memberId String        @map("member_id")
+  toggle   ConsentToggle @map("toggle")
+  value    Boolean       @map("value")
+  source   String        @map("source")
+  at       DateTime      @default(now()) @map("at") @db.Timestamptz(6)
+
+  @@index([memberId], map: "consent_event_member_id_idx")
+  @@map("consent_event")
+  @@schema("public")
+}
+
+enum ConsentToggle {
+  DIRECTORY
+  BLOOD_GROUP
+  PHOTO
+  PAYMENT_DISCLOSURE_ACK
+
+  @@schema("public")
+}
+
+model ErasureRequest {
+  id          String    @id @map("id")
+  memberId    String    @map("member_id")
+  source      String    @map("source")
+  status      String    @map("status")
+  requestedAt DateTime  @default(now()) @map("requested_at") @db.Timestamptz(6)
+  executedAt  DateTime? @map("executed_at") @db.Timestamptz(6)
+  executedBy  String?   @map("executed_by")
+
+  @@index([memberId, status], map: "erasure_request_member_status_idx")
+  @@map("erasure_request")
+  @@schema("public")
+}
+
+model OfficerMessage {
+  id        String    @id @map("id")
+  memberId  String    @map("member_id")
+  kind      String    @map("kind")
+  reason    String    @map("reason")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  readAt    DateTime? @map("read_at") @db.Timestamptz(6)
+
+  @@index([memberId], map: "officer_message_member_id_idx")
+  @@map("officer_message")
+  @@schema("public")
+}
+
+model Invite {
+  code      String   @id @map("code")
+  familyId  String   @map("family_id")
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@index([familyId], map: "invite_family_id_idx")
+  @@index([expiresAt], map: "invite_expires_at_idx")
+  @@map("invite")
+  @@schema("public")
+}
+
+model PincodeCache {
+  pincode   String   @id @map("pincode")
+  district  String   @map("district")
+  state     String   @map("state")
+  fetchedAt DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+
+  @@map("pincode_cache")
+  @@schema("public")
+}

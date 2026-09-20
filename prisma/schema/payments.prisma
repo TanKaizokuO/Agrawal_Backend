@@ -1,0 +1,116 @@
+// Payments Prisma schema — owns Payment, Refund, HeadAnchor, WebhookEvent tables
+
+enum PaymentPurpose {
+  REGISTRATION
+  BUSINESS_LISTING
+
+  @@schema("public")
+}
+
+enum PaymentStatus {
+  CREATED
+  CAPTURED
+  FAILED
+  REFUND_PENDING
+  REFUNDED
+
+  @@schema("public")
+}
+
+enum IdentityKind {
+  VPA
+  CARD
+  NONE
+
+  @@schema("public")
+}
+
+enum RefundReason {
+  DUPLICATE_HEAD
+  JOIN_DECLINED
+  JOIN_EXPIRED
+  REGISTRATION_CANCELLED
+  REGISTRATION_ABANDONED
+  PUBLICATION_FAILED
+  OFFICER
+
+  @@schema("public")
+}
+
+enum RefundStatus {
+  REQUESTED
+  PROCESSED
+  FAILED
+
+  @@schema("public")
+}
+
+model Payment {
+  id                String         @id
+  purpose           PaymentPurpose
+  subjectId         String         @map("subject_id")
+  payerPhoneE164    String         @map("payer_phone_e164")
+  payerMemberId     String?        @map("payer_member_id")
+  amountPaise       Int            @map("amount_paise")
+  currency          String         @default("INR")
+  status            PaymentStatus  @default(CREATED)
+  razorpayOrderId   String         @unique @map("razorpay_order_id")
+  razorpayPaymentId String?        @unique @map("razorpay_payment_id")
+  method            String?
+  identityKind      IdentityKind?  @map("identity_kind")
+  identityHash      String?        @map("identity_hash")
+  identityMasked    String?        @map("identity_masked")
+  capturedAt        DateTime?      @map("captured_at") @db.Timestamptz(6)
+  failedAt          DateTime?      @map("failed_at") @db.Timestamptz(6)
+  failureReason     String?        @map("failure_reason")
+  consumedAt        DateTime?      @map("consumed_at") @db.Timestamptz(6)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  retainUntil       DateTime?      @map("retain_until") @db.Timestamptz(6)
+  refunds           Refund[]
+
+  @@index([subjectId], map: "payment_subject_id_idx")
+  @@index([identityHash], map: "payment_identity_hash_idx")
+  @@index([status, createdAt], map: "payment_status_created_at_idx")
+  @@map("payment")
+  @@schema("public")
+}
+
+model Refund {
+  id               String       @id
+  paymentId        String       @map("payment_id")
+  payment          Payment      @relation(fields: [paymentId], references: [id])
+  reason           RefundReason
+  amountPaise      Int          @map("amount_paise")
+  razorpayRefundId String?      @unique @map("razorpay_refund_id")
+  status           RefundStatus @default(REQUESTED)
+  requestedAt      DateTime     @default(now()) @map("requested_at") @db.Timestamptz(6)
+  processedAt      DateTime?    @map("processed_at") @db.Timestamptz(6)
+  failureReason    String?      @map("failure_reason")
+
+  @@unique([paymentId], map: "refund_payment_id_unique")
+  @@index([status, requestedAt], map: "refund_status_requested_at_idx")
+  @@map("refund")
+  @@schema("public")
+}
+
+model HeadAnchor {
+  identityHash String   @id @map("identity_hash")
+  familyId     String   @unique @map("family_id")
+  paymentId    String   @map("payment_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("head_anchor")
+  @@schema("public")
+}
+
+model WebhookEvent {
+  eventId     String    @id @map("event_id")
+  event       String
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+  payload     Json
+
+  @@map("webhook_event")
+  @@schema("public")
+}

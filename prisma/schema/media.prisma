@@ -1,0 +1,46 @@
+// ---------------------------------------------------------------------------
+// Media module — uploaded images, visibility and screening state
+// ---------------------------------------------------------------------------
+
+model Image {
+  id                  String       @id @db.Uuid
+  purpose             ImagePurpose
+  status              ImageStatus  @default(UNSCREENED)
+  ownerRegistrationId String?      @map("owner_registration_id") @db.Uuid
+  ownerMemberId       String?      @map("owner_member_id") @db.Uuid
+  familyId            String?      @map("family_id") @db.Uuid
+  s3Key               String       @map("s3_key")
+  widthPx             Int          @map("width_px")
+  heightPx            Int          @map("height_px")
+  bytes               Int
+  screeningScore      Json?        @map("screening_score")
+  statusReason        String?      @map("status_reason")
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  screenedAt          DateTime?    @map("screened_at") @db.Timestamptz(6)
+  removedAt           DateTime?    @map("removed_at") @db.Timestamptz(6)
+  removedBy           String?      @map("removed_by") @db.Uuid
+
+  @@index([status, createdAt], map: "image_status_created_at_idx")
+  @@index([ownerMemberId], map: "image_owner_member_id_idx")
+  @@index([ownerRegistrationId], map: "image_owner_registration_id_idx")
+  @@map("image")
+  @@schema("public")
+}
+
+enum ImagePurpose {
+  MEMBER_PHOTO
+  FAMILY_PHOTO
+  BUSINESS_PHOTO
+  SHOK_SANDESH_PHOTO
+
+  @@schema("public")
+}
+
+enum ImageStatus {
+  UNSCREENED
+  APPROVED
+  REJECTED
+  REMOVED
+
+  @@schema("public")
+}

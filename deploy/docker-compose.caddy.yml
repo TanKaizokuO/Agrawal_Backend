@@ -1,0 +1,33 @@
+# apps/api/deploy/docker-compose.caddy.yml
+# Docker Compose stack for Caddy Reverse Proxy & TLS Termination
+# Reference: docs/backend/architecture.md
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: agrawal-caddy
+    restart: unless-stopped
+    # host network mode enables direct proxying to 127.0.0.1:3000 and 127.0.0.1:3001
+    network_mode: host
+    environment:
+      DOMAIN: ${DOMAIN}
+      STAGING_API_HOST: ${STAGING_API_HOST:-staging-api.${DOMAIN}}
+      PROD_API_HOST: ${PROD_API_HOST:-api.${DOMAIN}}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@${DOMAIN}}
+      STAGING_UPSTREAM: "127.0.0.1:${STAGING_PORT:-3001}"
+      PROD_UPSTREAM: "127.0.0.1:${PROD_PORT:-3000}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: ${LOG_DRIVER:-json-file}
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+    name: agrawal_caddy_data
+  caddy_config:
+    name: agrawal_caddy_config

@@ -1,0 +1,60 @@
+// ---------------------------------------------------------------------------
+// Notifications module — device ownership and delivery records.
+// ---------------------------------------------------------------------------
+
+model DeviceToken {
+  token       String   @id @map("token")
+  memberId    String   @map("member_id")
+  platform    String   @map("platform")
+  environment String   @default("production") @map("environment")
+  appVersion  String?  @map("app_version")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  @@index([memberId], map: "device_token_member_id_idx")
+  @@index([memberId, environment], map: "device_token_member_environment_idx")
+  @@map("device_token")
+  @@schema("public")
+}
+
+/// One row represents one logical notification to one Member. The composite
+/// key makes repeated queue deliveries idempotent.
+model PushDelivery {
+  id               String              @id @map("id")
+  memberId         String              @map("member_id")
+  topic            String              @map("topic")
+  subjectId        String              @map("subject_id")
+  acceptedCount    Int                 @default(0) @map("accepted_count")
+  failedCount      Int                 @default(0) @map("failed_count")
+  attempts         Int                 @default(0) @map("attempts")
+  status           String              @default("QUEUED") @map("status")
+  retryScheduledAt DateTime?           @map("retry_scheduled_at") @db.Timestamptz(6)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tokens           PushDeliveryToken[]
+
+  @@unique([memberId, topic, subjectId], map: "push_delivery_member_topic_subject_key")
+  @@index([topic, subjectId], map: "push_delivery_topic_subject_idx")
+  @@index([status, retryScheduledAt], map: "push_delivery_retry_idx")
+  @@map("push_delivery")
+  @@schema("public")
+}
+
+/// Per-token state is kept separately so a retry can target transiently failed
+/// tokens only, without sending a second logical message to accepted devices.
+model PushDeliveryToken {
+  id         String       @id @map("id")
+  deliveryId String       @map("delivery_id")
+  token      String       @map("token")
+  status     String       @default("PENDING") @map("status")
+  attempts   Int          @default(0) @map("attempts")
+  errorCode  String?      @map("error_code")
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at")
+  delivery   PushDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([deliveryId, token], map: "push_delivery_token_delivery_token_key")
+  @@index([token], map: "push_delivery_token_token_idx")
+  @@map("push_delivery_token")
+  @@schema("public")
+}

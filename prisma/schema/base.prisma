@@ -1,0 +1,39 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["public", "restricted"]
+}
+
+/// A fixed-window counter shared by every API process.
+model RateLimitBucket {
+  name        String   @map("name")
+  key         String   @map("key")
+  windowStart DateTime @map("window_start") @db.Timestamptz(6)
+  count       Int      @default(0) @map("count")
+
+  @@id([name, key, windowStart])
+  @@index([windowStart])
+  @@map("rate_limit_bucket")
+  @@schema("public")
+}
+
+/// The completed response for a client action that supplied an idempotency key.
+model IdempotencyRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  principalKey   String   @map("principal_key")
+  key            String   @map("key")
+  requestHash    String   @map("request_hash")
+  responseStatus Int      @map("response_status")
+  responseBody   Json     @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([principalKey, key], map: "idempotency_record_principal_key_key")
+  @@index([createdAt])
+  @@map("idempotency_record")
+  @@schema("public")
+}
