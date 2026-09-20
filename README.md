@@ -1,7 +1,136 @@
-# Agrawal_Backend — API
+# Agrawal Samaj — Backend API (`Agrawal_Backend`)
 
-Express (Node, TypeScript) API with PostgreSQL + Prisma, issuing its own session tokens (ADR-0014). The source is built (commit `efb535a`, 20 September 2026). It is not deployed and not verified against live services; see [`docs/REMAINING BACKEND WORK.md`](docs/REMAINING%20BACKEND%20WORK.md).
+The core REST API and background worker service powering the Agrawal Samaj platform. Built with Express 5, TypeScript, Prisma ORM, and PostgreSQL.
 
-- Owns the HTTP contract both clients build against.
-- Replaces the mocked services in `Agrawal_Frontend/prototypes/registration/src/services/` (auth, payment, registration, image scan).
-- Domain names and invariants: `CONTEXT.md` (copy in this directory; canonical version lives in the `Agrawal_App` repository).
+This service owns the single HTTP contract that all client applications (`Agrawal_App` Flutter mobile app and `Agrawal_Frontend` web client) build against.
+
+---
+
+## Features & Modules
+
+| Module | Purpose |
+|---|---|
+| **`identity`** | Member households, Family links, head-of-family anchor, invitations, and Gotra management. |
+| **`registration`** | Self-registration flow, phone verification via Firebase, duplicate detection, and friction fee handling. |
+| **`blood-sos`** | Emergency blood donor matching ladder (place-based radial matching), request alerts, and privacy-shielded reach reporting. |
+| **`events`** | Community event registration, pass minting, Gate Device verification, and offline admission sync. |
+| **`notices`** | Shok Sandesh (obituaries) with respect periods and general community announcements. |
+| **`business`** | Verified community business directory, categorisation, and keyword search. |
+| **`officer`** | Grievance escalation, duplicate review, and statutory data erasure with restricted archival (DPDP Act compliance). |
+| **`payments`** | Razorpay payment intent creation, signature verification, and idempotency-guarded webhooks. |
+| **`media`** | Presigned S3 uploads and automated visual content safety moderation via Sightengine. |
+| **`notifications`** | Push delivery via Firebase Cloud Messaging (FCM) with background retry queue. |
+
+---
+
+## Technology Stack
+
+- **Runtime**: Node.js `>=24.0.0`
+- **Framework**: Express 5 (TypeScript, ESM)
+- **Database & ORM**: PostgreSQL (RDS 18.3+) + Prisma 7 (pg adapter)
+- **Background Jobs**: `pg-boss` queue runner
+- **API Spec & Validation**: Zod v4 schemas + `@asteasolutions/zod-to-openapi` (OpenAPI v3.1)
+- **Authentication**: Firebase Phone Auth exchange → Secure HTTP-only session cookies / Bearer tokens
+- **Testing**: Vitest + Supertest
+
+---
+
+## Directory Layout
+
+```
+src/
+  adapters/               Third-party adapters (S3, Razorpay, Sightengine, Translate, Pincode)
+  http/                   Middleware (auth, CSRF, rate-limiting, error handling, idempotency)
+  modules/                Domain feature modules (routes, schemas, services, background jobs)
+  openapi/                OpenAPI spec registry and code generator
+  app.ts                  Express application setup and route registration
+  config.ts               Validated environment configuration
+  db.ts                   Prisma client database connection
+  main.ts                 HTTP server and worker entry point
+prisma/
+  schema/                 Prisma schema split by domain models
+deploy/                   Deployment manifests and systemd unit files
+docs/                     Architecture guides, module specs, and remaining work tracker
+openapi/                  Exported OpenAPI v1 specifications (v1.yaml and openapi.json)
+test/                     Integration test suite (Vitest)
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+- **Node.js**: `>=24.0.0`
+- **npm**: `>=10.0.0`
+- **PostgreSQL**: PostgreSQL 16+ (local Docker or AWS RDS instance)
+
+### Setup
+
+1. **Install dependencies**:
+   ```bash
+   npm install
+   ```
+
+2. **Configure environment**:
+   ```bash
+   cp .env.example .env
+   ```
+   > **Note**: Edit `.env` with your local database URL and provider credentials. Never commit `.env` or paste live RDS credentials into version control.
+
+3. **Generate Prisma client & run migrations**:
+   ```bash
+   npm run prisma:generate
+   npm run prisma:migrate
+   ```
+
+4. **Start the development server**:
+   ```bash
+   npm run dev
+   ```
+   The API will listen at `http://localhost:3000`.
+
+---
+
+## Scripts & Testing
+
+```bash
+# Typecheck TypeScript source
+npm run typecheck
+
+# Build production bundle to dist/
+npm run build
+
+# Run linter
+npm run lint
+
+# Run Vitest test suite
+npm test
+
+# Generate OpenAPI contract (openapi/v1.yaml & openapi.json)
+npm run openapi
+
+# Start production server
+npm start
+```
+
+---
+
+## Docker Deployment
+
+Build and run using the standalone Docker container:
+
+```bash
+# Build Docker image
+docker build -t agrawal-api .
+
+# Run with docker-compose (spins up local postgres and api)
+docker compose up -d
+```
+
+---
+
+## Documentation & References
+
+- Domain rules & glossary: [`CONTEXT.md`](CONTEXT.md)
+- Remaining backend work & live RDS checklist: [`docs/REMAINING BACKEND WORK.md`](docs/REMAINING%20BACKEND%20WORK.md)
+- Backend architecture documentation: [`docs/backend/architecture.md`](docs/backend/architecture.md)
