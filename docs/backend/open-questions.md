@@ -6,7 +6,7 @@ Operator Decisions Round 7 (ADR-0026, 21 September 2026) answered this file's fo
 
 ## Operator facts still missing
 
-1. **The Officer's grievance email address.** The channel is decided — email only, 30-day response (ADR-0017, ADR-0026 §2) — and the fiduciary is named: Mr Rahul Kumar Agrawal, the proprietor personally (ADR-0026 §1). The mailbox address itself is not yet handed over. The consent and privacy notices cannot ship without it.
+1. ~~The Officer's grievance email address.~~ **Resolved 21 September 2026 (ADR-0027):** the mailbox is `help.agrawal.app@gmail.com`, under the Operator's control. The consent and privacy notices can now publish the channel; the 30-day response SLA stands (ADR-0017).
 2. **The Google Cloud project** for `romanizeText`. A GCP project with the Cloud Translation API enabled, a service account key, and billing. Needed by M2.
 3. **UPI VPA availability on production** — Razorpay's docs do not promise `vpa` is always present and unmasked for UPI Intent / QR payments. M5's done-when says: if `vpa` is absent on the first real ₹1 payment, record that fact here. The answer determines how many founding registrations get flagged as `NO_PAYMENT_IDENTITY` versus how many are silently anchored.
 

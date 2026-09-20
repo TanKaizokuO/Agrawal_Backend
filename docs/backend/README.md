@@ -1,17 +1,17 @@
 # Backend build plan — Stage 1 and Stage 2
 
-The plan an agent follows to build the API (`Agrawal_Backend/`): the Express API that the React web client (`Agrawal_Frontend/apps/web`) and the Flutter app (repository root) both call. It covers Stage 1 (22 September 2026) and Stage 2 (11 October 2026). Stage 3 is out of scope; where a Stage 3 feature constrains a Stage 1–2 decision, the constraint is stated in place.
+The plan an agent follows to build the API (`Agrawal_Backend/`): the Express API that the React web client (`Agrawal_Frontend/apps/web`) and the Flutter app (`Agrawal_App/`) both call. It covers Stage 1 (22 September 2026) and Stage 2 (11 October 2026). Stage 3 is out of scope; where a Stage 3 feature constrains a Stage 1–2 decision, the constraint is stated in place.
 
 **Vocabulary is `CONTEXT.md`.** Every term in capitals here — Applicant, Registration, Member, Family, Head of Family, Donor, Notice, Officer — means exactly what the glossary says. Name code after it: a `Registration` model, not `Signup`; `headMemberId`, not `ownerId`. When the code and the glossary disagree, the glossary wins and the disagreement is a bug.
 
-**Decision record.** The decisions behind this plan come from `docs/adr/`. The design session of 18 September 2026 is recorded in ADR-0022 (Stage 1 moved to 22 September with reduced scope; image screening deferred), ADR-0023 (every adult pays; duplicate heads refused and refunded after payment; refunds on Registrations that don't complete; one phone per Member), ADR-0024 (backend architecture) and ADR-0025 (Blood SOS widens by place instead of distance).
+**Decision record.** The canonical decisions behind this plan live in `Agrawal_App/docs/adr/`. The design session of 18 September 2026 is recorded in ADR-0022 (Stage 1 moved to 22 September with reduced scope; image screening deferred), ADR-0023 (every adult pays; duplicate heads refused and refunded after payment; refunds on Registrations that don't complete; one phone per Member), ADR-0024 (backend architecture) and ADR-0025 (Blood SOS widens by place instead of distance). Round 7 and Play-readiness sessions added ADR-0026, ADR-0027 (grievance mailbox: `help.agrawal.app@gmail.com`), and ADR-0028 (web deployment on AWS; Vercel retired).
 
 ## How to use this plan
 
 1. Read `architecture.md` in full before writing any code. It fixes the stack, the repository layout, the module boundary rule and every cross-cutting convention (errors, auth, idempotency, jobs, rate limits, the Processing Record, testing).
 2. Work the milestones below **in order**. Each milestone names the module files to read; read them before starting it.
 3. A milestone is done only when every line of its **done when** list is true and verified — tests passing is necessary, not sufficient.
-4. Commit at checkpoints per `docs/agents/checkpoints.md`. The API has its own CI and deploy; a push to `main` also redeploys the prototypes on Vercel, so the root `npm run build` must still pass.
+4. Commit at checkpoints per `Agrawal_App/docs/agents/checkpoints.md`. The API has its own CI and deploy; web surfaces deploy to AWS (ADR-0028), so the root `npm run build` in `Agrawal_Frontend/` must still pass.
 
 ## Reference files
 

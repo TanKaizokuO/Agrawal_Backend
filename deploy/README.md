@@ -1,20 +1,21 @@
 # Deployment and Operations Runbook
 
-This directory contains the deployment and operational infrastructure assets for `apps/api` per [`docs/backend/architecture.md`](../../docs/backend/architecture.md).
+This directory contains the deployment and operational infrastructure assets for `Agrawal_Backend` (formerly `apps/api`) per [`docs/backend/architecture.md`](../docs/backend/architecture.md).
 
 ---
 
 ## 1. Architecture Overview
 
 - **Host**: Shared EC2 `t3.small` instance (`ap-south-1`).
-- **Database**: PostgreSQL 16 on AWS RDS (`db.t3.small`), separate databases `agrawal_staging` and `agrawal_prod`.
+- **Database**: PostgreSQL on AWS RDS (`db.t3.small`; target PG 16, current instance 18.3), separate databases `agrawal_staging` and `agrawal_prod`.
 - **Reverse Proxy / TLS**: Caddy container terminating TLS via Let's Encrypt / ZeroSSL for both hostnames (`staging-api.<domain>` and `api.<domain>`).
+- **Web Frontend**: Web surfaces (`Agrawal_Frontend`) also deploy to AWS (S3+CloudFront or EC2+Caddy); Vercel is retired (Agrawal_App ADR-0028).
 - **Access**: SSH is closed. Access and deployments are performed exclusively via AWS Systems Manager (SSM) Session Manager and Run Command.
 - **CI/CD**: GitHub Actions builds Docker images, pushes to Amazon ECR, and executes `deploy.sh` via `aws ssm send-command`.
 
 | Environment | Hostname | Upstream Loopback Port | Docker Compose Stack | Database | Deploy Trigger |
 |---|---|---|---|---|---|
-| **Staging** | `staging-api.<domain>` | `127.0.0.1:3001` | `docker-compose.staging.yml` | `agrawal_staging` | Push to `main` with changes in `apps/api/**` |
+| **Staging** | `staging-api.<domain>` | `127.0.0.1:3001` | `docker-compose.staging.yml` | `agrawal_staging` | Push to `main` in `Agrawal_Backend` |
 | **Production** | `api.<domain>` | `127.0.0.1:3000` | `docker-compose.production.yml` | `agrawal_prod` | Git tag `api-v*` |
 
 ---
@@ -63,11 +64,10 @@ When triggered via SSM, `deploy.sh <env> <IMAGE_URI>` executes:
 
 ## 4. Local Development
 
-Local development uses `apps/api/docker-compose.yml`, which starts **only** PostgreSQL 16:
+Local development uses `docker-compose.yml` in `Agrawal_Backend`, which starts **only** PostgreSQL 16:
 
 ```bash
 # Start local PostgreSQL 16 (includes pg_trgm and citext extensions)
-cd apps/api
 docker compose up -d
 
 # Check readiness
@@ -78,7 +78,7 @@ The database container automatically initializes:
 - Required extensions: `pg_trgm`, `citext`.
 - Dedicated roles: `postgres` (migration owner) and `agrawal_app` (restricted app user).
 
-Connection strings for local development are provided in `apps/api/.env.example`.
+Connection strings for local development are provided in `.env.example`.
 
 ---
 

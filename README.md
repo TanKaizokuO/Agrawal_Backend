@@ -2,7 +2,7 @@
 
 The core REST API and background worker service powering the Agrawal Samaj platform. Built with Express 5, TypeScript, Prisma ORM, and PostgreSQL.
 
-This service owns the single HTTP contract that all client applications (`Agrawal_App` Flutter mobile app and `Agrawal_Frontend` web client) build against.
+This service owns the single HTTP contract that all client applications (`Agrawal_App` Flutter mobile app and `Agrawal_Frontend` web client) build against. All web and API workloads deploy to AWS infrastructure under the Operator's control (Vercel is retired per ADR-0028).
 
 ---
 
@@ -27,7 +27,7 @@ This service owns the single HTTP contract that all client applications (`Agrawa
 
 - **Runtime**: Node.js `>=24.0.0`
 - **Framework**: Express 5 (TypeScript, ESM)
-- **Database & ORM**: PostgreSQL (RDS 18.3+) + Prisma 7 (pg adapter)
+- **Database & ORM**: PostgreSQL (repository targets PostgreSQL 16; live AWS RDS instance is 18.3) + Prisma 7 (pg adapter)
 - **Background Jobs**: `pg-boss` queue runner
 - **API Spec & Validation**: Zod v4 schemas + `@asteasolutions/zod-to-openapi` (OpenAPI v3.1)
 - **Authentication**: Firebase Phone Auth exchange → Secure HTTP-only session cookies / Bearer tokens
@@ -130,7 +130,17 @@ docker compose up -d
 ---
 
 ## Documentation & References
+ 
+ - Domain rules & glossary: [`CONTEXT.md`](CONTEXT.md)
+ - Remaining backend work & live RDS checklist: [`docs/REMAINING BACKEND WORK.md`](docs/REMAINING%20BACKEND%20WORK.md)
+ - Backend architecture documentation: [`docs/backend/architecture.md`](docs/backend/architecture.md)
+ - Play Store compliance binder & Data Safety disclosures: [`../Agrawal_App/docs/compliance/play-store-compliance.md`](../Agrawal_App/docs/compliance/play-store-compliance.md)
+ - Architecture Decision Records: [`../Agrawal_App/docs/adr/`](../Agrawal_App/docs/adr/) (including ADR-0027 mailbox handover and ADR-0028 AWS deployment)
 
-- Domain rules & glossary: [`CONTEXT.md`](CONTEXT.md)
-- Remaining backend work & live RDS checklist: [`docs/REMAINING BACKEND WORK.md`](docs/REMAINING%20BACKEND%20WORK.md)
-- Backend architecture documentation: [`docs/backend/architecture.md`](docs/backend/architecture.md)
+---
+
+## Governance & DPDP Compliance
+
+- **Data Fiduciary:** Mr. Rahul Kumar Agrawal, proprietor personally (ADR-0026 §1).
+- **Data & Verification Officer:** Mr. Rahul, responsible for identity integrity and moderation (ADR-0005, ADR-0017).
+- **Grievance Redressal Mailbox:** `help.agrawal.app@gmail.com` (ADR-0027), protected under 2FA and recovery phone, monitored to statutory 30-day resolution SLA. Supersedes the never-existed `grievance@agrawalsamaj.org`.
