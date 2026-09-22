@@ -1,10 +1,11 @@
 import type { Server } from "node:http";
 import type { PrismaClient } from "./generated/prisma/client.js";
-import pino, { type Logger } from "pino";
+import type { Logger } from "pino";
 import type { Express } from "express";
 import { createApp, mountRawRazorpayWebhook, type ApiApp } from "./app.js";
 import { loadConfig, type Config } from "./config.js";
 import { systemClock } from "./clock.js";
+import { createLogger } from "./logger.js";
 import { createPrismaClient } from "./db.js";
 import {
   createJobRuntime,
@@ -110,7 +111,7 @@ import {
 } from "./modules/events/index.js";
  
 
-const logger = pino();
+const logger = createLogger();
 
 export interface ApiRuntime {
   readonly app: ApiApp;

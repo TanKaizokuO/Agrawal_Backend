@@ -1,10 +1,11 @@
 import cors from "cors";
 import express, { type Express, type Request, type RequestHandler, type Response } from "express";
 import helmet from "helmet";
-import pino, { type Logger } from "pino";
+import type { Logger } from "pino";
 import { pinoHttp } from "pino-http";
 import type { Config } from "./config.js";
 import { checkDatabase } from "./db.js";
+import { createLogger, redactRequestUrl, withRedaction } from "./logger.js";
 import { csrf } from "./http/csrf.js";
 import { errorMiddleware, AppError } from "./http/errors.js";
 import { requestId as requestIdMiddleware } from "./http/request-id.js";
@@ -63,24 +64,7 @@ function jsonOnlyBody(rawBodyPathPrefixes: readonly string[]): RequestHandler {
 }
 
 function makeLogger(logger: Logger | undefined): Logger {
-  if (logger !== undefined) return logger;
-  return pino({
-    redact: {
-      paths: [
-        "req.headers.authorization",
-        "req.headers.cookie",
-        "*.firebaseIdToken",
-        "*.phoneE164",
-        "*.vpa",
-        "*.dateOfBirth",
-        "*.address*",
-        "*.bloodGroup",
-        "*.nominee*",
-        "req.body",
-      ],
-      censor: "[REDACTED]",
-    },
-  });
+  return logger === undefined ? createLogger() : withRedaction(logger);
 }
 export function mountRawRazorpayWebhook(
   app: Express,
@@ -104,6 +88,7 @@ export function createApp(dependencies: AppDependencies): Express {
   app.use(
     pinoHttp<Request>({
       logger,
+      serializers: { req: redactRequestUrl },
       genReqId: (request) => {
         const id = request.headers["x-request-id"];
         return Array.isArray(id) ? id[0] ?? "" : id ?? "";
