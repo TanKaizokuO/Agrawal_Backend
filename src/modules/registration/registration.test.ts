@@ -151,6 +151,13 @@ function harness() {
     identity,
     officer,
     jobs,
+    media: {
+      reassign: (): Promise<void> => Promise.resolve(),
+      deleteOwnedByRegistration: (): Promise<void> => Promise.resolve(),
+    },
+    romanizer: {
+      romanize: (text: string): Promise<string> => Promise.resolve(text),
+    },
   });
 
   async function createRegistration(phoneE164: string, status: "STARTED" | "PAID", paymentId?: string): Promise<string> {

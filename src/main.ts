@@ -350,7 +350,9 @@ export function createApiRuntime(
     payments: paymentService,
     identity: identityPort(() => identityService),
     jobs,
+    media: mediaService,
     officer: registrationOfficerPort(() => deferred.officer),
+    romanizer,
   });
   deferred.registration = registrationService;
 

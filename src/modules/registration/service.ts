@@ -76,7 +76,11 @@ export interface RegistrationMediaPort {
   reassign(
     tx: Tx,
     imageIds: readonly string[],
-    owner: { readonly ownerMemberId: string; readonly familyId?: string },
+    owner: {
+      readonly fromRegistrationId: string;
+      readonly ownerMemberId: string;
+      readonly familyId?: string;
+    },
   ): Promise<void>;
   deleteOwnedByRegistration(tx: Tx, registrationId: string): Promise<void>;
 }
@@ -96,9 +100,9 @@ export interface RegistrationDeps {
   readonly payments: PaymentsPort;
   readonly identity: IdentityPort;
   readonly jobs: JobRuntime;
-  readonly media?: RegistrationMediaPort;
+  readonly media: RegistrationMediaPort;
   readonly officer: RegistrationOfficerPort;
-  readonly romanizer?: Romanizer;
+  readonly romanizer: Romanizer;
 }
 
 export interface FoundingResult {
@@ -215,9 +219,9 @@ export class RegistrationService implements RegistrationIdentityPort {
   private readonly payments: PaymentsPort;
   private readonly identity: IdentityPort;
   private readonly jobs: JobRuntime;
-  private readonly media: RegistrationMediaPort | undefined;
+  private readonly media: RegistrationMediaPort;
   private readonly officer: RegistrationOfficerPort;
-  private readonly romanizer: Romanizer | undefined;
+  private readonly romanizer: Romanizer;
 
   constructor(deps: RegistrationDeps) {
     this.db = deps.db;
@@ -479,7 +483,7 @@ export class RegistrationService implements RegistrationIdentityPort {
       const profile = this.profileFromJson(registration.submittedProfile);
       const createInput = await this.createMemberInput(registration.phoneE164, profile);
       const created = await this.register.createMemberInFamily(tx, family.familyId, createInput);
-      await this.reassignImages(tx, profile, created.memberId, family.familyId);
+      await this.reassignImages(tx, profile, registration.id, created.memberId, family.familyId);
       await this.payments.markConsumed(tx, registration.paymentId);
       await this.identity.promoteToMember(tx, registration.id, created.memberId);
       const completedAt = this.clock.now();
@@ -591,7 +595,6 @@ export class RegistrationService implements RegistrationIdentityPort {
     const textHash = createHash("sha256").update(normalized).digest("hex");
     const cached = await this.db.romanizationCache.findUnique({ where: { textHash } });
     if (cached !== null) return cached.latin;
-    if (this.romanizer === undefined) throw new AppError("UPSTREAM_UNAVAILABLE", 503);
     let latin: string;
     try {
       latin = (await this.romanizer.romanize(normalized)).trim();
@@ -676,7 +679,7 @@ export class RegistrationService implements RegistrationIdentityPort {
           relatedIds: possibleDuplicates.sharedAddressHeads,
         });
       }
-      await this.reassignImages(tx, input, created.memberId, created.familyId);
+      await this.reassignImages(tx, input, registration.id, created.memberId, created.familyId);
       await this.payments.markConsumed(tx, paymentId);
       await this.identity.promoteToMember(tx, registration.id, created.memberId);
       const completedAt = this.clock.now();
@@ -820,6 +823,7 @@ export class RegistrationService implements RegistrationIdentityPort {
   private async reassignImages(
     tx: Tx,
     input: SubmitInput | PreparedProfile,
+    fromRegistrationId: string,
     ownerMemberId: string,
     familyId: string,
   ): Promise<void> {
@@ -827,8 +831,7 @@ export class RegistrationService implements RegistrationIdentityPort {
       ? uniqueIds([input.photoImageId, input.familyPhotoImageId ?? undefined])
       : uniqueIds([input.photoImageId]);
     if (ids.length === 0) return;
-    if (this.media === undefined) throw new AppError("IMAGE_NOT_OWNED", 422);
-    await this.media.reassign(tx, ids, { ownerMemberId, familyId });
+    await this.media.reassign(tx, ids, { fromRegistrationId, ownerMemberId, familyId });
   }
 
   private async assertHeadForRegistration(
@@ -940,7 +943,7 @@ export class RegistrationService implements RegistrationIdentityPort {
     if (refundReason !== undefined && registration.paymentId !== null) {
       await this.payments.refund(tx, registration.paymentId, refundReason, { kind: "SYSTEM" });
     }
-    if (this.media !== undefined) await this.media.deleteOwnedByRegistration(tx, registration.id);
+    await this.media.deleteOwnedByRegistration(tx, registration.id);
     const now = this.clock.now();
     await tx.registration.update({
       where: { id: registration.id },

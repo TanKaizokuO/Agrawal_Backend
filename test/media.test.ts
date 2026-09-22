@@ -130,13 +130,38 @@ describe("Media visibility, ownership and cleanup", () => {
     await expect(service.urlFor(uploaded.imageId, { registrationId: OTHER_REGISTRATION_ID })).resolves.toBeNull();
 
     await database.$transaction(async (tx) => {
-      await service.reassign(tx, [uploaded.imageId], { ownerMemberId: MEMBER_ID });
+      await service.reassign(tx, [uploaded.imageId], {
+        fromRegistrationId: REGISTRATION_ID,
+        ownerMemberId: MEMBER_ID,
+      });
     });
     await expect(service.ownedByRegistration(uploaded.imageId, REGISTRATION_ID, "MEMBER_PHOTO")).resolves.toBe(false);
     await expect(service.ownedBy(uploaded.imageId, { memberId: MEMBER_ID }, "MEMBER_PHOTO")).resolves.toBe(true);
     await expect(service.urlFor(uploaded.imageId, { memberId: MEMBER_ID })).resolves.toMatch(/^https:/u);
     await expect(service.urlFor(uploaded.imageId, { memberId: OTHER_MEMBER_ID })).resolves.toBeNull();
     await expect(service.isVisibleToOthers(uploaded.imageId)).resolves.toBe(false);
+  });
+
+  it("refuses to reassign an image the registration did not upload", async () => {
+    const objectStore = new FakeObjectStore();
+    const jobs = new FakeJobs();
+    const service = createService(database, objectStore, jobs, { screeningEnabled: false });
+    const othersImage = await service.upload({
+      purpose: "MEMBER_PHOTO",
+      body: await imageBytes(),
+      contentType: "image/jpeg",
+      owner: { memberId: OTHER_MEMBER_ID },
+    });
+
+    await expect(
+      database.$transaction(async (tx) => {
+        await service.reassign(tx, [othersImage.imageId], {
+          fromRegistrationId: REGISTRATION_ID,
+          ownerMemberId: MEMBER_ID,
+        });
+      }),
+    ).rejects.toMatchObject({ code: "IMAGE_NOT_OWNED" });
+    await expect(service.ownedBy(othersImage.imageId, { memberId: OTHER_MEMBER_ID }, "MEMBER_PHOTO")).resolves.toBe(true);
   });
 
   it("stores rejected screening results for review but never serves them to another member", async () => {
