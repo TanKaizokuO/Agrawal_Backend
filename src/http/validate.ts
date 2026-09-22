@@ -41,7 +41,16 @@ export function validate(schemas: ValidationSchemas): RequestHandler {
       }
 
       if (part === "body") request.body = result.data;
-      if (part === "query") request.query = result.data as typeof request.query;
+      // Express 5 defines req.query as a getter on the prototype, so plain
+      // assignment throws in strict mode. Shadow it on the instance instead.
+      if (part === "query") {
+        Object.defineProperty(request, "query", {
+          value: result.data,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      }
       if (part === "params") request.params = result.data as typeof request.params;
     }
 
