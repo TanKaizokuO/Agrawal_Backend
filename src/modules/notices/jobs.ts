@@ -1,12 +1,12 @@
 import type { WorkerRegistration } from "../../jobs.js";
-import { z } from "zod";
+import { PaymentCapturedPayload, paymentCapturedJobName } from "../payments/index.js";
 import type { NoticesService } from "./service.js";
 
 export const NOTICES_JOB_NAMES = {
   expireListings: "noticeboards.expireListings",
   endSuspensions: "noticeboards.endSuspensions",
   escalateArchivals: "noticeboards.escalateArchivals",
-  paymentCaptured: "payments.captured.BUSINESS_LISTING",
+  paymentCaptured: paymentCapturedJobName("BUSINESS_LISTING"),
 } as const;
 
 export const JOB_SCHEDULES = {
@@ -26,12 +26,6 @@ export const JOB_SCHEDULES = {
     key: NOTICES_JOB_NAMES.escalateArchivals,
   },
 } as const;
-
-const PaymentCapturedPayload = z.object({
-  id: z.uuid(),
-  subjectId: z.uuid(),
-  purpose: z.literal("BUSINESS_LISTING"),
-});
 
 export function createNoticesWorkers(service: NoticesService): readonly WorkerRegistration[] {
   return [
@@ -59,9 +53,8 @@ export function createNoticesWorkers(service: NoticesService): readonly WorkerRe
     {
       name: NOTICES_JOB_NAMES.paymentCaptured,
       handler: async (payload: unknown) => {
-        const parsed = PaymentCapturedPayload.safeParse(payload);
-        if (!parsed.success) return;
-        await service.onPaymentCaptured(parsed.data);
+        const { paymentId, subjectId } = PaymentCapturedPayload.parse(payload);
+        await service.onPaymentCaptured({ id: paymentId, subjectId, purpose: "BUSINESS_LISTING" });
       },
     },
   ];

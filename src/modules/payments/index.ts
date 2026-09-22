@@ -26,6 +26,11 @@ export {
   type RestrictedStorageMover,
 } from "./service.js";
 
+export {
+  PaymentCapturedPayload,
+  paymentCapturedJobName,
+} from "./events.js";
+
 /** The small seam consumed by Register for erasure and head succession. */
 export interface PaymentsPort {
   moveToRestricted(tx: PaymentTxClient, payerMemberId: string, retainUntil: Date): Promise<void>;

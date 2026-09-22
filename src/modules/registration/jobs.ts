@@ -1,12 +1,13 @@
 import { z } from "zod";
 import type { WorkerRegistration } from "../../jobs.js";
+import { PaymentCapturedPayload, paymentCapturedJobName } from "../payments/index.js";
 import type { RegistrationService } from "./service.js";
 
 export const JOB_NAMES = {
   expireJoinRequest: "registration.expireJoinRequest",
   expireJoinRequests: "registration.expireJoinRequests",
   abandonIdle: "registration.abandonIdle",
-  paymentCaptured: "payments.captured.REGISTRATION",
+  paymentCaptured: paymentCapturedJobName("REGISTRATION"),
 } as const;
 
 export const JOB_SCHEDULES = {
@@ -23,10 +24,6 @@ export const JOB_SCHEDULES = {
 } as const;
 
 const RegistrationIdPayload = z.object({ registrationId: z.uuid() });
-const CapturedPaymentPayload = z.object({
-  paymentId: z.string().min(1),
-  subjectId: z.uuid(),
-});
 
 export function createRegistrationWorkers(service: RegistrationService): readonly WorkerRegistration[] {
   return [
@@ -54,7 +51,7 @@ export function createRegistrationWorkers(service: RegistrationService): readonl
     {
       name: JOB_NAMES.paymentCaptured,
       handler: async (payload: unknown) => {
-        const { paymentId, subjectId } = CapturedPaymentPayload.parse(payload);
+        const { paymentId, subjectId } = PaymentCapturedPayload.parse(payload);
         await service.onRegistrationPaymentCaptured(paymentId, subjectId);
       },
     },

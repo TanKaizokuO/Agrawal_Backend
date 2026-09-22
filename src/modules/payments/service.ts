@@ -6,6 +6,7 @@ import type { PaymentGateway, PaymentProviderPayment } from "../../adapters/port
 import type { JobRuntime } from "../../jobs.js";
 import { AppError } from "../../http/errors.js";
 import { isRecord } from "./guards.js";
+import { paymentCapturedJobName, type PaymentCapturedPayload } from "./events.js";
 import type {
   PaymentDatabase,
   PaymentRow,
@@ -542,9 +543,10 @@ export class PaymentService {
     });
     if (changed.count === 0) return;
 
+    const captured: PaymentCapturedPayload = { paymentId: payment.id, subjectId: payment.subjectId };
     await this.jobs.send(
-      `payments.captured.${payment.purpose}`,
-      { paymentId: payment.id, subjectId: payment.subjectId },
+      paymentCapturedJobName(payment.purpose),
+      captured,
       JOB_RETRY_OPTIONS,
     );
   }
