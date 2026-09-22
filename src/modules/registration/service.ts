@@ -634,6 +634,12 @@ export class RegistrationService implements RegistrationIdentityPort {
 
     return this.db.$transaction(async (tx) => {
       const registration = await this.lockedRegistration(tx, registrationId);
+      // A concurrent submit may have completed while this one waited on the lock.
+      if (
+        registration?.status === "COMPLETED"
+        && registration.completedMemberId !== null
+        && registration.phoneE164 === profile.phoneE164
+      ) return this.completedResult(registration.completedMemberId);
       if (
         registration === null
         || registration.status !== "PAID"
