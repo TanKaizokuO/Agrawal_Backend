@@ -2,7 +2,7 @@
 
 The Stage 1 and Stage 2 backend, Flutter transport client, deployment assets, database schema, migrations, workers, and source-level security fixes are implemented. The remaining work requires infrastructure, operator decisions, and live vendor accounts. A reachable PostgreSQL instance (AWS RDS) now exists; see §1. Do not commit credentials to this repository.
 
-**Repository layout, 21 September 2026:** the project split into three sibling folders. This repository (`Agrawal_App/`) holds the Flutter app at its root plus the project docs. The API moved from `apps/api/` to `Agrawal_Backend/`; the prototypes, site build and `apps/web` moved to `Agrawal_Frontend/`. Paths below name the new locations.
+**Repository layout, 21 September 2026:** the project split into three sibling repositories. This repository (`Agrawal_Backend/`) holds the API, backend tests, database schema, migrations, and deployment assets. The Flutter app and project-level docs live in `Agrawal_App/`; prototypes and web surfaces live in `Agrawal_Frontend/`.
 
 ## Verified locally
 
@@ -18,7 +18,7 @@ The Stage 1 and Stage 2 backend, Flutter transport client, deployment assets, da
 
 ## 1. PostgreSQL required to finish runtime verification
 
-A reachable instance now exists: AWS RDS PostgreSQL 18.3 at `database-1.cvm24i0yc44i.ap-south-1.rds.amazonaws.com:5432` (ap-south-1, publicly accessible, SSL enforced by pg_hba). Verified 2026-09-21: TLS `verify-full` with the RDS global CA bundle (`global-bundle.pem`, copied to `Agrawal_Backend/`) connects, and `pg_trgm`, `citext`, and `unaccent` are available but not yet installed. `Agrawal_Backend/.env` (gitignored) holds working `DATABASE_URL`/`DATABASE_MIGRATION_URL`, both currently using the master `postgres` role against the `postgres` database.
+A reachable instance was previously verified: AWS RDS PostgreSQL 18.3 at `database-1.cvm24i0yc44i.ap-south-1.rds.amazonaws.com:5432` (ap-south-1, publicly accessible, SSL enforced by pg_hba). On 21 September 2026, TLS `verify-full` with the RDS global CA bundle connected, and `pg_trgm`, `citext`, and `unaccent` were available but not installed. No `.env` exists now; restore access only with separated migration/runtime roles rather than the master `postgres` role.
 
 Connection-string constraint: the repo's `pg` v8 maps `sslmode=require` to full certificate verification, so URLs must use `sslmode=verify-full&sslrootcert=<absolute path to global-bundle.pem>`.
 
@@ -34,7 +34,7 @@ Remaining checks:
 6. Exercise every raw SQL trigger, partial unique index, immutable field, succession transaction, webhook replay, and erasure-retention path.
 7. Confirm all 13 recurring pg-boss schedules exist once and execute successfully.
 
-Local fallback: `postgres:16`, `postgres:17`, and `postgres:16-alpine` Docker images are now cached on the dev machine (psql runs via container; no local server or system client installed).
+Local fallback status (22 September 2026): the project PostgreSQL Docker container and `postgres:16-alpine` image were removed because this workstation must not write Docker layers to the root filesystem. No host PostgreSQL server/client is installed. Further local database verification requires a root-safe PostgreSQL runtime with binaries/cache on the WD workspace and data in RAM, or the separated non-production RDS database.
 
 ## 2. Operator facts required before staging
 
@@ -105,7 +105,7 @@ Provider work:
 
 Required infrastructure:
 
-- RDS PostgreSQL 16 databases for staging and production. One instance already exists (PostgreSQL 18.3, ap-south-1, publicly accessible with enforced TLS, master credentials only in the local gitignored `.env`): assign it to an environment or create per-environment databases, resolve the 16-vs-18 engine question from §1, and restrict network access before it holds real data.
+- RDS PostgreSQL 16 databases for staging and production. One PostgreSQL 18.3 instance in ap-south-1 was previously reachable with enforced TLS, but no local credentials remain: restore access with separated migration/runtime roles, assign it to an environment or create per-environment databases, resolve the 16-vs-18 engine question from §1, and restrict network access before it holds real data.
 - Private S3 media buckets with Block Public Access, encryption, lifecycle policy, and least-privilege API access.
 - ECR repositories for staging and production images.
 - EC2 host with Docker/Caddy and SSM Agent.
@@ -113,7 +113,7 @@ Required infrastructure:
 - DNS records and TLS for `staging-api.<domain>` and `api.<domain>`.
 - RDS automated backups/PITR and a restore target.
 
-GitHub repository configuration required by the API workflow (`Agrawal_Backend/.github/workflows/api.yml`, moved out of this repository with the backend):
+GitHub repository configuration required by this repository's API workflow (`.github/workflows/api.yml`):
 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`

@@ -23,8 +23,12 @@ services:
     ports:
       # Expose only Postgres on 127.0.0.1 to avoid public host exposure
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    # The WD Black workspace is NTFS and cannot satisfy PostgreSQL's required
+    # POSIX chmod semantics. Keep local database state in RAM so Docker never
+    # writes it to the root partition; container recreation starts clean.
+    tmpfs:
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=1g,mode=0700
     volumes:
-      - postgres_data:/var/lib/postgresql/data
       - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
     healthcheck:
       # Deterministic readiness check: verifies PostgreSQL accepts connections on target database
@@ -36,6 +40,3 @@ services:
       retries: 10
       start_period: 5s
 
-volumes:
-  postgres_data:
-    name: agrawal_postgres_local_data

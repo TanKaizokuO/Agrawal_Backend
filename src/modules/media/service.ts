@@ -350,7 +350,7 @@ export class MediaService {
         status: "REMOVED",
         statusReason: "REPLACED",
         removedAt: this.deps.clock.now(),
-        removedBy: "SYSTEM",
+        removedBy: null,
       },
     });
     await this.invokeRemovedHandlers(tx, {

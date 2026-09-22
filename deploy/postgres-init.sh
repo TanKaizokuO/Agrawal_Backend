@@ -20,6 +20,7 @@ psql \
   -- Required extensions per docs/backend/architecture.md
   CREATE EXTENSION IF NOT EXISTS "pg_trgm";
   CREATE EXTENSION IF NOT EXISTS "citext";
+  CREATE EXTENSION IF NOT EXISTS "unaccent";
   SELECT set_config('app.bootstrap_db_name', :'db_name', false);
   SELECT set_config('app.bootstrap_app_user', :'app_db_user', false);
   SELECT set_config('app.bootstrap_app_password', :'app_db_password', false);

@@ -4,7 +4,6 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
 import { promisify } from "node:util";
-import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import { Pool } from "pg";
 import { createPrismaClient, type Database } from "../src/db.js";
@@ -16,7 +15,7 @@ const prismaCli = require.resolve("prisma/build/index.js");
 
 const runtimeDatabaseUrl = requireTestDatabaseUrl("DATABASE_URL");
 const migrationDatabaseUrl = requireTestDatabaseUrl("DATABASE_MIGRATION_URL");
-const testSchema = `vitest_${String(process.pid)}_${randomUUID().replaceAll("-", "")}`;
+const testSchema = "public";
 
 let database: Database | undefined;
 let adminPool: Pool | undefined;
@@ -50,11 +49,6 @@ function requireTestDatabaseUrl(name: "DATABASE_URL" | "DATABASE_MIGRATION_URL")
   return value;
 }
 
-function withSchema(connectionString: string): string {
-  const url = new URL(connectionString);
-  url.searchParams.set("schema", testSchema);
-  return url.toString();
-}
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -111,16 +105,21 @@ export function getTestDatabase(): Database {
 }
 
 beforeAll(async () => {
-  const migrationUrl = withSchema(migrationDatabaseUrl);
-  const runtimeUrl = withSchema(runtimeDatabaseUrl);
   adminPool = new Pool({ connectionString: migrationDatabaseUrl });
 
   try {
-    await adminPool.query(`CREATE SCHEMA ${quoteIdentifier(testSchema)}`);
-    await migrateFreshSchema(migrationUrl);
-    database = createPrismaClient(runtimeUrl);
+    // Prisma models explicitly target `public`/`restricted`, so a connection
+    // search-path override cannot isolate them. The URL guard above guarantees
+    // this is a test database; rebuild both owned schemas for each test file.
+    await adminPool.query("DROP SCHEMA IF EXISTS restricted CASCADE");
+    await adminPool.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await adminPool.query("CREATE SCHEMA public");
+    await migrateFreshSchema(migrationDatabaseUrl);
+    database = createPrismaClient(runtimeDatabaseUrl);
   } catch (error) {
-    await adminPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(testSchema)} CASCADE`).catch(() => undefined);
+    await adminPool.query("DROP SCHEMA IF EXISTS restricted CASCADE").catch(() => undefined);
+    await adminPool.query("DROP SCHEMA IF EXISTS public CASCADE").catch(() => undefined);
+    await adminPool.query("CREATE SCHEMA IF NOT EXISTS public").catch(() => undefined);
     await adminPool.end();
     adminPool = undefined;
     throw error;
@@ -137,7 +136,9 @@ afterAll(async () => {
   await currentDatabase?.$disconnect();
 
   if (adminPool) {
-    await adminPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(testSchema)} CASCADE`);
+    await adminPool.query("DROP SCHEMA IF EXISTS restricted CASCADE");
+    await adminPool.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await adminPool.query("CREATE SCHEMA public");
     await adminPool.end();
     adminPool = undefined;
   }

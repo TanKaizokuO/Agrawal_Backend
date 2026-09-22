@@ -231,13 +231,15 @@ export class RegisterService {
     this.romanizer = deps.romanizer;
     this.processingRecord = deps.processingRecord;
     this.nomineeReadAuthorizer = deps.nomineeReadAuthorizer;
+    const suspensionResolver = deps.suspensionResolver as SuspensionResolver | null | undefined;
     if (
-      typeof deps.suspensionResolver !== "function"
-      && typeof deps.suspensionResolver.resolveActiveSuspension !== "function"
+      suspensionResolver == null
+      || (typeof suspensionResolver !== "function"
+          && typeof suspensionResolver.resolveActiveSuspension !== "function")
     ) {
       throw new Error("RegisterService requires suspensionResolver");
     }
-    this.suspensionResolver = deps.suspensionResolver;
+    this.suspensionResolver = suspensionResolver;
   }
   async withTransaction<T>(
     callback: (tx: Tx) => Promise<T>,

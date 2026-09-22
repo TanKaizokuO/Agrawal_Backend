@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { Clock } from "../src/clock.js";
 import { FixedClock } from "../src/clock.js";
+import type { Database } from "../src/db.js";
 import type { JobRuntime } from "../src/jobs.js";
 import {
   BloodSosService,
@@ -10,7 +11,7 @@ import {
 import type { NotificationsPort } from "../src/modules/notifications/index.js";
 import { getTestDatabase } from "./setup.js";
 
-const db = getTestDatabase();
+let db: Database;
 const clock: Clock = new FixedClock(new Date("2026-09-20T10:00:00.000Z"));
 const config: BloodSosConfig = {
   tierIntervalMinutes: 30,
@@ -19,6 +20,10 @@ const config: BloodSosConfig = {
   donorCooldownDays: 90,
   donorDailyAlertCap: 3,
 };
+
+beforeAll(() => {
+  db = getTestDatabase();
+});
 
 class RecordingJobs implements JobRuntime {
   readonly enabled = true;

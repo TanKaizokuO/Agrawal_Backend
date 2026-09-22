@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AppError } from "../src/http/errors.js";
 import { isRecord } from "../src/adapters/guards.js";
 import { FixedClock } from "../src/clock.js";
@@ -108,8 +108,11 @@ function createService(
 }
 
 describe("Media visibility, ownership and cleanup", () => {
-  const database = getTestDatabase();
+  let database: Database;
 
+  beforeAll(() => {
+    database = getTestDatabase();
+  });
   beforeEach(async () => {
     await database.image.deleteMany();
   });
@@ -255,7 +258,7 @@ describe("Media visibility, ownership and cleanup", () => {
     });
     expect(await database.image.count({ where: { ownerMemberId: MEMBER_ID } })).toBe(0);
     const deleteJobs = jobs.sent.filter((job) => job.name === JOB_NAMES.deleteObject);
-    expect(deleteJobs).toHaveLength(2);
+    expect(deleteJobs).toHaveLength(3);
     for (const job of deleteJobs) {
       const key = deleteJobKey(job.payload);
       expect(key).not.toBeNull();

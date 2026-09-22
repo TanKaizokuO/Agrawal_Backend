@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { Clock } from "../src/clock.js";
 import { FixedClock } from "../src/clock.js";
+import type { Database } from "../src/db.js";
 import type { JobRuntime } from "../src/jobs.js";
 import type { PushMessage, PushSender } from "../src/adapters/ports.js";
 import type {
@@ -15,7 +16,7 @@ import {
 import type { LocalizedPushMessage } from "../src/modules/notifications/schemas.js";
 import { getTestDatabase } from "./setup.js";
 
-const db = getTestDatabase();
+let db: Database;
 const clock: Clock = new FixedClock(new Date("2026-09-19T10:00:00.000Z"));
 
 const message: LocalizedPushMessage = {
@@ -25,6 +26,10 @@ const message: LocalizedPushMessage = {
   body: { en: "English body", hi: "हिन्दी संदेश" },
   data: { messageId: "00000000-0000-4000-8000-000000000002" },
 };
+
+beforeAll(() => {
+  db = getTestDatabase();
+});
 
 class TestJobs implements JobRuntime {
   readonly enabled = true;

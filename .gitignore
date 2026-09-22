@@ -17,6 +17,7 @@ __pycache__/
 Thumbs.db
 .omp/
 .claude/
+.local/
 .DS_Store
 
 # Logs
