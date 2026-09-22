@@ -4,6 +4,7 @@ export const logRedaction = {
   paths: [
     "req.headers.authorization",
     "req.headers.cookie",
+    'res.headers["set-cookie"]',
     "req.params.token",
     "*.firebaseIdToken",
     "*.phoneE164",

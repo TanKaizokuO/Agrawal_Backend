@@ -10,6 +10,7 @@ import { getTestDatabase } from "./setup.js";
 const SESSION_TOKEN = "session-token-7f3a";
 const COOKIE_SID = "cookie-sid-91bc";
 const DEVICE_TOKEN = "fcm-device-token-44de";
+const ISSUED_SID = "issued-sid-5d20";
 
 function captureStream(): { stream: Writable; output: () => string } {
   const chunks: string[] = [];
@@ -32,6 +33,11 @@ function appWithLogger(logger: pino.Logger): Express {
       app.put("/v1/me/devices/:token", (_request, response) => {
         response.status(204).end();
       });
+      // Mirrors web login, which issues the session in Set-Cookie.
+      app.post("/v1/auth/session", (_request, response) => {
+        response.setHeader("Set-Cookie", `sid=${ISSUED_SID}; HttpOnly`);
+        response.status(201).json({});
+      });
     },
   });
 }
@@ -43,6 +49,11 @@ async function sendSecretBearingRequest(app: Express): Promise<void> {
     .set("Cookie", `sid=${COOKIE_SID}`)
     .set("Content-Type", "application/json")
     .send("{}");
+  const login = await request(app)
+    .post("/v1/auth/session")
+    .set("Content-Type", "application/json")
+    .send("{}");
+  expect(login.headers["set-cookie"]).toEqual([`sid=${ISSUED_SID}; HttpOnly`]);
 }
 
 describe("request logging", () => {
@@ -56,6 +67,7 @@ describe("request logging", () => {
     expect(logged).not.toContain(SESSION_TOKEN);
     expect(logged).not.toContain(COOKIE_SID);
     expect(logged).not.toContain(DEVICE_TOKEN);
+    expect(logged).not.toContain(ISSUED_SID);
   });
 
   it("builds the production logger with the same redaction", async () => {
@@ -69,6 +81,7 @@ describe("request logging", () => {
     expect(logged).not.toContain(SESSION_TOKEN);
     expect(logged).not.toContain(COOKIE_SID);
     expect(logged).not.toContain(DEVICE_TOKEN);
+    expect(logged).not.toContain(ISSUED_SID);
     expect(logged).not.toContain("+919999900000");
   });
 });
