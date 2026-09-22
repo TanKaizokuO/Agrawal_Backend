@@ -102,7 +102,8 @@ export const configSchema = z.object({
   sightengineApiUser: requiredText.optional(),
   sightengineApiSecret: requiredText.optional(),
   eventPassSigningKeys,
-  retentionDaysPayments: positiveInteger.default(365),
+  // ADR-0026 §5: eight years statutory retention.
+  retentionDaysPayments: positiveInteger.default(2920),
   retentionDaysConsentAndLogs: positiveInteger.default(365),
   registrationAbandonAfterHours: positiveInteger.default(24),
   joinRequestExpiryDays: positiveInteger.default(14),
@@ -142,7 +143,8 @@ export class ConfigError extends Error {
   }
 }
 
-const ENV_NAME_BY_FIELD: Record<string, string> = {
+// Typed against the schema keys so a field without an env name fails to compile.
+const ENV_NAME_BY_FIELD: Record<keyof typeof configSchema.shape, string> = {
   nodeEnv: "NODE_ENV",
   appEnv: "APP_ENV",
   port: "PORT",
@@ -169,6 +171,7 @@ const ENV_NAME_BY_FIELD: Record<string, string> = {
   sightengineApiUser: "SIGHTENGINE_API_USER",
   sightengineApiSecret: "SIGHTENGINE_API_SECRET",
   eventPassSigningKeys: "EVENT_PASS_SIGNING_KEYS",
+  retentionDaysPayments: "RETENTION_DAYS_PAYMENTS",
   retentionDaysConsentAndLogs: "RETENTION_DAYS_CONSENT_AND_LOGS",
   registrationAbandonAfterHours: "REGISTRATION_ABANDON_AFTER_HOURS",
   joinRequestExpiryDays: "JOIN_REQUEST_EXPIRY_DAYS",
@@ -189,51 +192,9 @@ const ENV_NAME_BY_FIELD: Record<string, string> = {
 };
 
 function toRecord(environment: NodeJS.ProcessEnv): Record<string, unknown> {
-  return {
-    nodeEnv: environment.NODE_ENV,
-    appEnv: environment.APP_ENV,
-    port: environment.PORT,
-    databaseUrl: environment.DATABASE_URL,
-    databaseMigrationUrl: environment.DATABASE_MIGRATION_URL,
-    webOrigins: environment.WEB_ORIGINS,
-    sessionTtlWebDays: environment.SESSION_TTL_WEB_DAYS,
-    sessionTtlMobileDays: environment.SESSION_TTL_MOBILE_DAYS,
-    firebaseProjectId: environment.FIREBASE_PROJECT_ID,
-    firebaseServiceAccountJson: environment.FIREBASE_SERVICE_ACCOUNT_JSON,
-    razorpayKeyId: environment.RAZORPAY_KEY_ID,
-    razorpayKeySecret: environment.RAZORPAY_KEY_SECRET,
-    razorpayWebhookSecret: environment.RAZORPAY_WEBHOOK_SECRET,
-    registrationPaymentPaise: environment.REGISTRATION_PAYMENT_PAISE,
-    businessListingFeePaise: environment.BUSINESS_LISTING_FEE_PAISE,
-    paymentIdentityHmacKey: environment.PAYMENT_IDENTITY_HMAC_KEY,
-    s3Bucket: environment.S3_BUCKET,
-    awsRegion: environment.AWS_REGION,
-    mediaUrlTtlSeconds: environment.MEDIA_URL_TTL_SECONDS,
-    googleCloudProject: environment.GOOGLE_CLOUD_PROJECT,
-    googleApplicationCredentialsJson: environment.GOOGLE_APPLICATION_CREDENTIALS_JSON,
-    imageScreeningEnabled: environment.IMAGE_SCREENING_ENABLED,
-    erasureSelfServiceEnabled: environment.ERASURE_SELF_SERVICE,
-    sightengineApiUser: environment.SIGHTENGINE_API_USER,
-    sightengineApiSecret: environment.SIGHTENGINE_API_SECRET,
-    eventPassSigningKeys: environment.EVENT_PASS_SIGNING_KEYS,
-    retentionDaysConsentAndLogs: environment.RETENTION_DAYS_CONSENT_AND_LOGS,
-    registrationAbandonAfterHours: environment.REGISTRATION_ABANDON_AFTER_HOURS,
-    joinRequestExpiryDays: environment.JOIN_REQUEST_EXPIRY_DAYS,
-    joinRequestsPendingMaxPerFamily: environment.JOIN_REQUESTS_PENDING_MAX_PER_FAMILY,
-    postingCapPerDay: environment.POSTING_CAP_PER_DAY,
-    reportsThreshold: environment.REPORTS_THRESHOLD,
-    suspensionDurationDays: environment.SUSPENSION_DURATION_DAYS,
-    archivalEscalationDays: environment.ARCHIVAL_ESCALATION_DAYS,
-    businessListingDurationDays: environment.BUSINESS_LISTING_DURATION_DAYS,
-    blockedWords: environment.BLOCKED_WORDS,
-    phoneRegexInText: environment.PHONE_REGEX_IN_TEXT,
-    sosTierIntervalMinutes: environment.SOS_TIER_INTERVAL_MINUTES,
-    sosExpiryHours: environment.SOS_EXPIRY_HOURS,
-    sosDensityFloor: environment.SOS_DENSITY_FLOOR,
-    donorCooldownDays: environment.DONOR_COOLDOWN_DAYS,
-    donorDailyAlertCap: environment.DONOR_DAILY_ALERT_CAP,
-    workersEnabled: environment.WORKERS_ENABLED,
-  };
+  return Object.fromEntries(
+    Object.entries(ENV_NAME_BY_FIELD).map(([field, variable]) => [field, environment[variable]]),
+  );
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Config {
@@ -243,7 +204,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Config
     : parsed.error.issues.map((issue) => {
         const field = issue.path[0]?.toString() ?? "configuration";
         return {
-          variable: ENV_NAME_BY_FIELD[field] ?? field,
+          variable: field in ENV_NAME_BY_FIELD
+            ? ENV_NAME_BY_FIELD[field as keyof typeof ENV_NAME_BY_FIELD]
+            : field,
           message: issue.message,
         };
       });
