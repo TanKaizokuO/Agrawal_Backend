@@ -188,6 +188,9 @@ export function createApiRuntime(
   const jobs = createJobRuntime({
     connectionString: config.databaseUrl,
     enabled: config.workersEnabled,
+    onError: (error) => {
+      runtimeLogger.error({ err: error }, "job runtime error");
+    },
   });
   const clock = systemClock;
   const idempotencyStore = createIdempotencyStore(database);
