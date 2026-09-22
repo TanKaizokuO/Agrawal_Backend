@@ -58,6 +58,7 @@ Agrawal_Backend/
     db.ts                 # Prisma client
     jobs.ts               # pg-boss instance, registerAllWorkers()
     clock.ts              # Clock port: now(); tests inject a fake clock
+    logger.ts             # createLogger(): pino with the redaction list; createApp wraps any supplied logger with it
     http/
       errors.ts           # AppError, error codes, error middleware
       validate.ts         # validate({ body, query, params }) middleware
@@ -232,7 +233,7 @@ Append-only is enforced by the database, not by convention (raw SQL migration in
 
 ## Logging
 
-pino with a redaction list covering: `req.headers.authorization`, `req.headers.cookie`, `*.firebaseIdToken`, `*.phoneE164`, `*.vpa`, `*.dateOfBirth`, `*.address*`, `*.bloodGroup`, `*.nominee*`, and every request body on `/v1/registration*`, `/v1/me*` and `/v1/officer*`. Log the route, status, duration, request ID and principal ID — never Member data. Logs are operational and rotate; they are **not** the processing record.
+pino with a redaction list covering: `req.headers.authorization`, `req.headers.cookie`, `res.headers["set-cookie"]`, the device token in `/v1/me/devices/:token` (URL and params), `*.firebaseIdToken`, `*.phoneE164`, `*.vpa`, `*.dateOfBirth`, `*.address*`, `*.bloodGroup`, `*.nominee*`, and every request body on `/v1/registration*`, `/v1/me*` and `/v1/officer*`. Log the route, status, duration, request ID and principal ID — never Member data. Logs are operational and rotate; they are **not** the processing record.
 
 ## Testing
 

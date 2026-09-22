@@ -126,7 +126,7 @@ Submission, in one transaction (`SELECT … FOR UPDATE` on the Registration):
 8. Heuristic flags (never blocking), through `officer.raiseFlag(tx, …)`:
    - `POSSIBLE_DUPLICATE_PERSON` — an ACTIVE or ARCHIVED Member with the same `nameEn` (case-insensitive, trimmed) or `nameHi`, and the same date of birth.
    - `SHARED_ADDRESS` — the Head of a different Family has the same normalized `line1` and pincode.
-9. `media.reassign(tx, imageIds, { ownerMemberId, familyId })` for the Member photo and family photo.
+9. `media.reassign(tx, imageIds, { fromRegistrationId, ownerMemberId, familyId })` for the Member photo and family photo; an image not uploaded by this Registration fails the transaction with `IMAGE_NOT_OWNED`.
 10. `identity.promoteToMember(tx, registration.id, memberId)`.
 11. Registration → `COMPLETED`, `completedMemberId`, `endedAt`; `submittedProfile = null`.
 
