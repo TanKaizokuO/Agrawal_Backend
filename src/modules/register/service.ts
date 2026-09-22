@@ -1769,19 +1769,9 @@ export class RegisterService {
   // -----------------------------------------------------------------------
 
   async purgeRestricted(): Promise<void> {
-    const now = this.clock.now();
-    await this.db.$executeRaw`
-      DELETE FROM restricted.consent_event WHERE retain_until < ${now}
-    `;
-    await this.db.$executeRaw`
-      DELETE FROM restricted.payment WHERE retain_until < ${now}
-    `;
-    await this.db.$executeRaw`
-      DELETE FROM restricted.refund WHERE retain_until < ${now}
-    `;
-    await this.db.$executeRaw`
-      DELETE FROM restricted.member_tombstone WHERE retain_until < ${now}
-    `;
+    // The app role has INSERT only on restricted.*; this owner-owned SECURITY
+    // DEFINER function deletes rows whose retain_until has passed.
+    await this.db.$executeRaw`SELECT restricted.purge_expired()`;
   }
 
   // -----------------------------------------------------------------------

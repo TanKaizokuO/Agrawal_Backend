@@ -58,6 +58,10 @@ jobs:
         run: |
           PGPASSWORD=postgres_test_password psql -h 127.0.0.1 -U postgres -d agrawal_test -c 'CREATE EXTENSION IF NOT EXISTS "pg_trgm"; CREATE EXTENSION IF NOT EXISTS "citext";'
 
+      - name: Create least-privilege app role
+        run: |
+          PGPASSWORD=postgres_test_password psql -h 127.0.0.1 -U postgres -d agrawal_test -c "CREATE ROLE agrawal_app LOGIN PASSWORD 'agrawal_app_test_password';"
+
       - name: Generate Prisma Client
         env:
           DATABASE_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
@@ -81,6 +85,7 @@ jobs:
           APP_ENV: local
           DATABASE_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
           DATABASE_MIGRATION_URL: postgresql://postgres:postgres_test_password@127.0.0.1:5432/agrawal_test?schema=public
+          TEST_APP_DATABASE_URL: postgresql://agrawal_app:agrawal_app_test_password@127.0.0.1:5432/agrawal_test?schema=public
           WEB_ORIGINS: http://localhost:5173
           REGISTRATION_PAYMENT_PAISE: 100
           BUSINESS_LISTING_FEE_PAISE: 4900

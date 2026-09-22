@@ -103,7 +103,8 @@ npm run build
 # Run linter
 npm run lint
 
-# Run Vitest test suite
+# Run Vitest test suite (set TEST_APP_DATABASE_URL to the agrawal_app role's URL
+# to also run the least-privilege retention and pg-boss checks)
 npm test
 
 # Generate OpenAPI contract (openapi/v1.yaml & openapi.json)

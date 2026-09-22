@@ -148,7 +148,13 @@ export interface JobRuntimeOptions {
 }
 
 export function createJobRuntime(options: JobRuntimeOptions): JobRuntime {
-  const boss = new PgBoss(options.connectionString);
+  // The pgboss schema is provisioned by a migration: the app role has no CREATE
+  // on the database, so pg-boss must not try to create it.
+  const boss = new PgBoss({
+    connectionString: options.connectionString,
+    schema: "pgboss",
+    createSchema: false,
+  });
   // PgBoss is an EventEmitter; an "error" event with no listener would crash
   // the process.
   boss.on("error", options.onError ?? (() => undefined));

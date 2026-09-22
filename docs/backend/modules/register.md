@@ -140,7 +140,7 @@ A Postgres schema `restricted` (Prisma `multiSchema`) holding rows moved out of 
 - `restricted.consent_event` — their consent history (`+ RETENTION_DAYS_CONSENT_AND_LOGS`).
 - `restricted.member_tombstone(member_id, erased_at, retain_until)` — the erased ID, so the moved rows can be tied together.
 
-The app role can `INSERT` into `restricted.*` and nothing else; a separate `retention` role used only by `register.purgeRestricted` can `SELECT`/`DELETE`. The Processing Record already carries `retain_until` from its insert and is not moved.
+The app role can `INSERT` into `restricted.*` and nothing else; `register.purgeRestricted` deletes expired rows through the owner-owned `SECURITY DEFINER` function `restricted.purge_expired()`, which the app role may only `EXECUTE`. The Processing Record already carries `retain_until` from its insert and is not moved.
 
 ## Visibility projections (the single place invariants 16, 20 and 22 live)
 
@@ -239,7 +239,7 @@ Withdrawing the directory-listing consent **is** an Erasure request (`CONTEXT.md
 | Job | Trigger | Effect |
 |---|---|---|
 | `register.fillDistrict` | on lookup failure; retry with backoff for 24 h | Fill `district` from PincodeDirectory |
-| `register.purgeRestricted` | daily 03:00 IST | Delete `restricted.*` rows with `retainUntil < now` (the `retention` role) |
+| `register.purgeRestricted` | daily 03:00 IST | Delete `restricted.*` rows with `retainUntil <` the database's `now()`, via `restricted.purge_expired()` |
 
 ## Public interface (`index.ts`)
 
@@ -272,7 +272,7 @@ findPossibleDuplicates(profile): Promise<{ samePerson: string[]; sharedAddressHe
 - invariant 5: Head erasure with a Nominee in the Family → Nominee is Head; without → oldest Member; sole Member → Family `ARCHIVED` and HeadAnchor released.
 - invariant 9: an archived Member is absent from every directory query.
 - invariant 16: SAMAJ projection has no `phoneE164`; FAMILY has it.
-- invariant 17: after Erasure — Member, link and images gone; sessions dead; `restricted.payment` holds their payment with `retainUntil`; the purge job removes it after the fake clock passes `retainUntil`, not before.
+- invariant 17: after Erasure — Member, link and images gone; sessions dead; `restricted.payment` holds their payment with `retainUntil`; the purge job removes it once the database's `now()` passes `retainUntil`, not before (the purge uses database time, not the fake clock; see architecture §Time).
 - invariant 20: `bloodGroup` absent from SAMAJ and FAMILY projections and from every directory response.
 - invariant 21: a Member with only `nameHi` projects `name.en = null`; `nameEnSearchKey` appears in no response body (assert by serialising every endpoint's response in the suite).
 - invariant 22: a table-driven test over every `Member` column × relation asserts presence exactly as the table above; adding a column without updating the table fails the test.

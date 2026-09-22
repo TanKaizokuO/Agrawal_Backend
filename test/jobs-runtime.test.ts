@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createJobRuntime, type JobRuntime } from "../src/jobs.js";
 
-const connectionString = process.env.TEST_DATABASE_MIGRATION_URL ?? process.env.DATABASE_MIGRATION_URL ?? "";
+// Prefer the least-privilege app role: pg-boss tables created by the owner would
+// not be usable by the app role that runs pg-boss in production.
+const connectionString =
+  process.env.TEST_APP_DATABASE_URL
+  ?? process.env.TEST_DATABASE_MIGRATION_URL
+  ?? process.env.DATABASE_MIGRATION_URL
+  ?? "";
 
 describe("pg-boss job runtime", () => {
   let runtime: JobRuntime | undefined;

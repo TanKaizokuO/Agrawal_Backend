@@ -220,7 +220,7 @@ Timed per-entity work (a Blood SOS widening step, a join request's expiry) uses 
 
 ## Time
 
-All storage in UTC (`timestamptz`). "Today" and "a day" mean the **IST calendar day** (`Asia/Kolkata`): the adult check (age ≥ 18 on today's IST date), the daily posting cap. `clock.ts` exposes `now()` and `todayIst()`; nothing calls `new Date()` directly outside it, so tests can move time.
+All storage in UTC (`timestamptz`). "Today" and "a day" mean the **IST calendar day** (`Asia/Kolkata`): the adult check (age ≥ 18 on today's IST date), the daily posting cap. `clock.ts` exposes `now()` and `todayIst()`; nothing calls `new Date()` directly outside it, so tests can move time. The one exception is retention purging: the purge functions compare `retain_until` with the database's `now()`, so the app role cannot make rows expire early by passing a later time.
 
 ## The Processing Record
 
@@ -228,7 +228,7 @@ An append-only audit table owned by the Officer module (see `modules/officer.md`
 
 Append-only is enforced by the database, not by convention (raw SQL migration in `prisma/sql/`):
 - The app role (`DATABASE_URL`) has `INSERT, SELECT` on `processing_record` and no `UPDATE`/`DELETE`.
-- A trigger raises on `UPDATE`, and on `DELETE` of any row whose `retain_until` is in the future; only the purge job's role deletes expired rows.
+- A trigger raises on `UPDATE`, and on `DELETE` of any row whose `retain_until` is in the future; the purge job deletes expired rows by calling the owner-owned `SECURITY DEFINER` function `public.purge_expired_processing_records()`, the only thing the app role may execute to delete.
 
 ## Logging
 
