@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "openapi": "tsx src/openapi/generate.ts",
     "prisma:generate": "prisma generate --schema prisma/schema",
