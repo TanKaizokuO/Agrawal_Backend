@@ -288,6 +288,12 @@ export function createApiRuntime(
         }
         return deferred.media.presignUrl(imageId, ttlSeconds);
       },
+      ownedBy: (imageId, owner, purpose) => {
+        if (deferred.media === undefined) {
+          throw new Error("Media service is not initialized");
+        }
+        return deferred.media.ownedBy(imageId, owner, purpose);
+      },
     },
     romanizer,
     processingRecord,
@@ -413,6 +419,7 @@ export function createApiRuntime(
         imageId,
         viewerMemberId === null ? {} : { memberId: viewerMemberId },
       ),
+      ownedBy: (imageId, memberId, purpose) => mediaService.ownedBy(imageId, { memberId }, purpose),
     },
     business: noticesBusiness,
     notifications: {

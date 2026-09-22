@@ -94,6 +94,7 @@ export type {
   NoticesBusinessPort,
   NoticesClock,
   NoticesConfig,
+  NoticeImagePurpose,
   NoticesMediaPort,
   NoticesNotificationsPort,
   NoticesProcessingRecordWriter,

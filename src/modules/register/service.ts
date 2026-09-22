@@ -89,6 +89,11 @@ export interface PaymentsPort {
 export interface MediaPort {
   isVisibleToOthers(imageId: string): Promise<boolean>;
   presignUrl(imageId: string, ttlSeconds: number): Promise<string>;
+  ownedBy(
+    imageId: string,
+    owner: { readonly memberId?: string; readonly familyId?: string },
+    purpose: "MEMBER_PHOTO" | "FAMILY_PHOTO",
+  ): Promise<boolean>;
 }
 export interface RegisterSuspensionResolver {
   resolveActiveSuspension(memberId: string): Promise<MemberSuspensionView | null>;
@@ -909,6 +914,7 @@ export class RegisterService {
   // -----------------------------------------------------------------------
 
   async setMemberPhoto(memberId: string, imageId: string | null): Promise<void> {
+    if (imageId !== null) await this.assertPhotoOwned(imageId, { memberId }, "MEMBER_PHOTO");
     await this.db.member.update({
       where: { id: memberId },
       data: { photoImageId: imageId },
@@ -921,10 +927,23 @@ export class RegisterService {
     if (family.headMemberId !== memberId) {
       throw new AppError("NOT_HEAD", 403);
     }
+    if (imageId !== null) {
+      await this.assertPhotoOwned(imageId, { memberId, familyId: family.familyId }, "FAMILY_PHOTO");
+    }
     await this.db.family.update({
       where: { id: family.familyId },
       data: { photoImageId: imageId },
     });
+  }
+
+  private async assertPhotoOwned(
+    imageId: string,
+    owner: { readonly memberId?: string; readonly familyId?: string },
+    purpose: "MEMBER_PHOTO" | "FAMILY_PHOTO",
+  ): Promise<void> {
+    if (!this.media || !(await this.media.ownedBy(imageId, owner, purpose))) {
+      throw new AppError("IMAGE_NOT_OWNED", 422);
+    }
   }
 
   // -----------------------------------------------------------------------

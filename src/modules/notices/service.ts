@@ -16,6 +16,7 @@ import type {
   NoticesBusinessPort,
   NoticesClock,
   NoticesConfig,
+  NoticeImagePurpose,
   NoticesMediaPort,
   NoticesNotificationsPort,
   NoticesProcessingRecordWriter,
@@ -146,6 +147,17 @@ export class NoticesService {
     }
   }
 
+  private async checkImageOwned(
+    imageId: string | null | undefined,
+    memberId: string,
+    purpose: NoticeImagePurpose,
+  ): Promise<void> {
+    if (imageId === null || imageId === undefined) return;
+    if (!(await this.media.ownedBy(imageId, memberId, purpose))) {
+      throw new AppError("IMAGE_NOT_OWNED", 422);
+    }
+  }
+
   private async checkPostingCap(memberId: string): Promise<void> {
     const todayIst = this.clock.todayIst();
     // Blood SOS is exempt (it lives in a different module and table).
@@ -188,6 +200,7 @@ export class NoticesService {
     await this.checkPostingCap(authorPrincipal.memberId);
 
     this.checkText([input.title, input.bodyEn, input.bodyHi]);
+    await this.checkImageOwned(input.imageId, authorPrincipal.memberId, "SHOK_SANDESH_PHOTO");
 
     const authorFamily = await this.register.familyOf(authorPrincipal.memberId);
     if (authorFamily === null) {
@@ -501,6 +514,7 @@ export class NoticesService {
     // Name (title) and description checked for personal phone numbers and blocked words
     // Business phone is structured and exempt from text regex check
     this.checkText([input.name, input.bodyEn, input.bodyHi]);
+    await this.checkImageOwned(input.imageId, authorPrincipal.memberId, "BUSINESS_PHOTO");
 
     const authorFamily = await this.register.familyOf(authorPrincipal.memberId);
     if (authorFamily === null) {
