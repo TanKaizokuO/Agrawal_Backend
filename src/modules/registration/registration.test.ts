@@ -290,8 +290,9 @@ describe("Registration public behavior", () => {
     await expect(
       h.service.submit(registrationId, "+919876543215", joinWithPhoto as SubmitInput),
     ).rejects.toMatchObject({
-      name: "ZodError",
-      issues: [expect.objectContaining({ path: ["familyPhotoImageId"] })],
+      code: "VALIDATION_FAILED",
+      httpStatus: 400,
+      details: { issues: [expect.objectContaining({ path: ["familyPhotoImageId"] })] },
     });
   });
 });

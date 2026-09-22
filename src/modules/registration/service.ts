@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { Prisma, type PrismaClient } from "../../generated/prisma/client.js";
-import { AppError } from "../../http/errors.js";
+import { AppError, validationDetails } from "../../http/errors.js";
 import type { Clock } from "../../clock.js";
 import type { Romanizer } from "../../adapters/ports.js";
 import type { JobRuntime } from "../../jobs.js";
@@ -396,7 +396,9 @@ export class RegistrationService implements RegistrationIdentityPort {
     phoneE164: string,
     input: SubmitInput,
   ): Promise<SubmitResult> {
-    const parsed = SubmitBody.parse(input);
+    const result = SubmitBody.safeParse(input);
+    if (!result.success) throw new AppError("VALIDATION_FAILED", 400, validationDetails(result.error));
+    const parsed = result.data;
     const current = await this.db.registration.findUnique({ where: { id: registrationId } });
     if (current === null || current.phoneE164 !== phoneE164) {
       throw new AppError("REGISTRATION_NOT_FOUND", 404);
