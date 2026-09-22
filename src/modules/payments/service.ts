@@ -251,7 +251,7 @@ export class PaymentService {
       // lock also closes the read-then-create race when two HTTP retries arrive
       // on different workers before either Payment row is visible.
       const lockKey = `payment-order:${input.purpose}:${input.subjectId}`;
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const captured = await tx.payment.findFirst({
         where: {
           purpose: input.purpose,
@@ -682,7 +682,7 @@ export class PaymentService {
 
     await this.db.$transaction(async (tx) => {
       const lockKey = `payment-refund:${refundId}`;
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const refund = await tx.refund.findUnique({ where: { id: refundId } });
       if (
         refund === null ||

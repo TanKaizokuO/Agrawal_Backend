@@ -246,7 +246,7 @@ export class RegistrationService implements RegistrationIdentityPort {
     phoneE164: string,
   ): Promise<{ readonly registrationId: string }> {
     if (!hasRegistrationTx(tx)) throw new AppError("INTERNAL", 500);
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-phone:${phoneE164}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-phone:${phoneE164}`}))`;
     const now = this.clock.now();
     const existing = await tx.registration.findFirst({
       where: { phoneE164, status: { in: ["STARTED", "PAID", "AWAITING_HEAD"] } },
@@ -728,7 +728,7 @@ export class RegistrationService implements RegistrationIdentityPort {
         || registration.paymentId !== paymentId
         || registration.phoneE164 !== profile.phoneE164
       ) throw new AppError("REGISTRATION_NOT_PAID", 409);
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-family:${family.id}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-family:${family.id}`}))`;
       const pending = await tx.registration.findMany({
         where: { joinFamilyId: family.id, status: "AWAITING_HEAD" },
         select: { id: true },
@@ -927,7 +927,7 @@ export class RegistrationService implements RegistrationIdentityPort {
   }
 
   private async lockedRegistration(tx: Tx, id: string) {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration:${id}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration:${id}`}))`;
     return tx.registration.findUnique({ where: { id } });
   }
 
