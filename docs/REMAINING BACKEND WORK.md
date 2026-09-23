@@ -4,18 +4,6 @@ The Stage 1 and Stage 2 backend, Flutter transport client, deployment assets, da
 
 **Repository layout, 21 September 2026:** the project split into three sibling repositories. This repository (`Agrawal_Backend/`) holds the API, backend tests, database schema, migrations, and deployment assets. The Flutter app and project-level docs live in `Agrawal_App/`; prototypes and web surfaces live in `Agrawal_Frontend/`.
 
-## Verified locally
-
-- `npm run typecheck` passes (in `Agrawal_Backend/`; re-verified 21 September 2026 after the split).
-- `npm run lint` passes (in `Agrawal_Backend/`; re-verified 21 September 2026).
-- `npm run openapi` passes and regenerates `Agrawal_Backend/openapi.json` identically (re-verified 21 September 2026).
-- Prisma format, validation, and client generation pass (re-verified 21 September 2026).
-- The API runtime composition smoke instantiated every service, adapter, route, and worker, then closed cleanly.
-- Flutter dependency resolution passes; 415 Flutter tests pass (re-verified 23 September 2026 in `Agrawal_App/`); the Flutter web release build passes.
-- The signed production release Android App Bundle (`app.agrawal.agrawal_samaj`, targetSdk 36, versionCode 1, release upload keystore) is built and verified (commits `5d42646`, `9678e3a`, `docs/compliance/play-store-compliance.md`). In addition, the dedicated closed-testing release bundle (`build/app/outputs/bundle/release/app-release-closed-test.aab`, built with `--dart-define=CLOSED_TEST=true`) is built and jarsigner verified with the release upload keystore for external testing and Play review.
-- The `Agrawal_Frontend` prototype production build passes (re-verified 21 September 2026).
-- The final source security review findings were fixed: persistent route quotas, pre-decode media concurrency control, archival-request/member binding, Officer erasure-request binding, opaque Blood SOS pushes, token ownership protection, Firebase project validation, recurring maintenance schedules, restricted-schema grants, and event-pass expiry equality.
-
 ## 1. PostgreSQL required to finish runtime verification
 
 A reachable instance was previously verified: AWS RDS PostgreSQL 18.3 at `database-1.cvm24i0yc44i.ap-south-1.rds.amazonaws.com:5432` (ap-south-1, publicly accessible, SSL enforced by pg_hba). On 21 September 2026, TLS `verify-full` with the RDS global CA bundle connected, and `pg_trgm`, `citext`, and `unaccent` were available but not installed. A local `.env` exists again (23 September 2026). It must use separated migration/runtime roles, not the master `postgres` role.
@@ -40,16 +28,7 @@ Known defect, local compose (found in code review, 23 September 2026): `docker c
 
 ## 2. Operator facts required before staging
 
-Operator Decisions Round 7 (ADR-0026, 21 September 2026), the Grievance Mailbox decision (ADR-0027), and the AWS Web Deployment decision (ADR-0028) resolved:
-- The registered legal identity (Mr Rahul Kumar Agrawal, the proprietor personally, ADR-0026 §1).
-- The Officer's grievance mailbox (`help.agrawal.app@gmail.com`, ADR-0027 — live under Operator control with 2FA and recovery phone configured; 30-day response SLA).
-- The production domain (`agrawal.app`, with `register.` and `api.` subdomains, ADR-0026 §3–4).
-- Web deployment architecture: all web surfaces deploy to AWS; Vercel is retired (ADR-0028). Canonical privacy policy URL is `https://register.agrawal.app/privacy`.
-- `RETENTION_DAYS_PAYMENTS` (2920 days / 8 years, ADR-0026 §5).
-- Family photo audience: closed default confirmed (ADR-0026 §6).
-- Blood SOS fields/fallback/cooldown (ADR-0026 §7–9).
-- Event Pass re-claim allowed (ADR-0026 §10).
-- Per-owner media quota: 30 live images (ADR-0026 §11).
+Resolved operator decisions are recorded in ADR-0026, ADR-0027, ADR-0028 and ADR-0029.
 
 The authoritative open-questions ledger is [`backend/open-questions.md`](backend/open-questions.md).
 
@@ -57,7 +36,6 @@ Still owed before staging:
 
 - The Google Cloud project for romanization (M2).
 - A decision on re-signing `feature-list.md`, which now diverges from ADR-0022, ADR-0025 and ADR-0026.
-- A decision on the API hostname. The deployed API answers at `https://backend.agrawal.app` (`/healthz` and `/readyz` return 200 on 23 September 2026). `api.agrawal.app` and `staging-api.agrawal.app` do not resolve. ADR-0026 §3–4 names `api.`. Also record which environment (staging or production) this server is.
 
 Implementation items created by ADR-0026:
 
@@ -105,6 +83,8 @@ Provider work:
 
 ### AWS
 
+Production runs at `https://backend.agrawal.app` on EC2. `.github/workflows/deploy.yml` deploys it on a push to `prod` (self-hosted runner, PM2, nginx, environment from Secrets Manager `prod/agrawal/env`). The items below are still required, mainly for staging.
+
 Required infrastructure:
 
 - RDS PostgreSQL 18 databases for staging and production (ADR-0029). One PostgreSQL 18.3 instance in ap-south-1 was previously reachable with enforced TLS, but no local credentials remain: restore access with separated migration/runtime roles, assign it to an environment or create per-environment databases and restrict network access before it holds real data.
@@ -112,7 +92,7 @@ Required infrastructure:
 - ECR repositories for staging and production images.
 - EC2 host with Docker/Caddy and SSM Agent.
 - SSM Parameter Store hierarchy and KMS key/policy.
-- DNS records and TLS for `staging-api.<domain>` and `api.<domain>`.
+- DNS records and TLS for `staging-api.<domain>`.
 - RDS automated backups/PITR and a restore target.
 
 GitHub repository configuration required by this repository's API workflow (`.github/workflows/api.yml`):
