@@ -1,10 +1,11 @@
 import type { Server } from "node:http";
 import type { PrismaClient } from "./generated/prisma/client.js";
-import pino, { type Logger } from "pino";
+import type { Logger } from "pino";
 import type { Express } from "express";
 import { createApp, mountRawRazorpayWebhook, type ApiApp } from "./app.js";
 import { loadConfig, type Config } from "./config.js";
 import { systemClock } from "./clock.js";
+import { createLogger } from "./logger.js";
 import { createPrismaClient } from "./db.js";
 import {
   createJobRuntime,
@@ -110,7 +111,7 @@ import {
 } from "./modules/events/index.js";
  
 
-const logger = pino();
+const logger = createLogger();
 
 export interface ApiRuntime {
   readonly app: ApiApp;
@@ -188,6 +189,9 @@ export function createApiRuntime(
   const jobs = createJobRuntime({
     connectionString: config.databaseUrl,
     enabled: config.workersEnabled,
+    onError: (error) => {
+      runtimeLogger.error({ err: error }, "job runtime error");
+    },
   });
   const clock = systemClock;
   const idempotencyStore = createIdempotencyStore(database);
@@ -284,6 +288,12 @@ export function createApiRuntime(
         }
         return deferred.media.presignUrl(imageId, ttlSeconds);
       },
+      ownedBy: (imageId, owner, purpose) => {
+        if (deferred.media === undefined) {
+          throw new Error("Media service is not initialized");
+        }
+        return deferred.media.ownedBy(imageId, owner, purpose);
+      },
     },
     romanizer,
     processingRecord,
@@ -347,7 +357,9 @@ export function createApiRuntime(
     payments: paymentService,
     identity: identityPort(() => identityService),
     jobs,
+    media: mediaService,
     officer: registrationOfficerPort(() => deferred.officer),
+    romanizer,
   });
   deferred.registration = registrationService;
 
@@ -407,6 +419,7 @@ export function createApiRuntime(
         imageId,
         viewerMemberId === null ? {} : { memberId: viewerMemberId },
       ),
+      ownedBy: (imageId, memberId, purpose) => mediaService.ownedBy(imageId, { memberId }, purpose),
     },
     business: noticesBusiness,
     notifications: {

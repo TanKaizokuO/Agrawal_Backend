@@ -56,8 +56,11 @@ export interface NoticesRegisterPort {
   onMemberArchived?(handler: (tx: NoticesTxClient, memberId: string) => Promise<void>): void;
 }
 
+export type NoticeImagePurpose = "SHOK_SANDESH_PHOTO" | "BUSINESS_PHOTO";
+
 export interface NoticesMediaPort {
   urlFor(imageId: string, viewerMemberId: string | null): Promise<string | null>;
+  ownedBy(imageId: string, memberId: string, purpose: NoticeImagePurpose): Promise<boolean>;
 }
 
 export interface BusinessCheckoutOrder {

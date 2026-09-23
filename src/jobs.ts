@@ -49,6 +49,10 @@ export interface JobRuntime {
 
 class PgBossRuntime implements JobRuntime {
   private started = false;
+  // pg-boss v12 rejects send/work/schedule on a queue that hasn't been
+  // created. create_queue is idempotent, so each name is ensured once per
+  // process on first use.
+  private readonly ensuredQueues = new Map<string, Promise<void>>();
 
   constructor(
     private readonly boss: PgBoss,
@@ -65,6 +69,19 @@ class PgBossRuntime implements JobRuntime {
     if (!this.started) return;
     await this.boss.stop();
     this.started = false;
+    this.ensuredQueues.clear();
+  }
+
+  private ensureQueue(name: string): Promise<void> {
+    let ensured = this.ensuredQueues.get(name);
+    if (ensured === undefined) {
+      ensured = this.boss.createQueue(name).catch((error: unknown) => {
+        this.ensuredQueues.delete(name);
+        throw error;
+      });
+      this.ensuredQueues.set(name, ensured);
+    }
+    return ensured;
   }
 
   isReady(): Promise<boolean> {
@@ -91,6 +108,7 @@ class PgBossRuntime implements JobRuntime {
       retryLimit: options?.retryLimit ?? 5,
       retryBackoff: options?.retryBackoff ?? true,
     };
+    await this.ensureQueue(name);
     return this.boss.send(name, payload, sendOptions);
   }
 
@@ -99,6 +117,7 @@ class PgBossRuntime implements JobRuntime {
       throw new Error("The job runtime is not started");
     }
     const options: WorkOptions = registration.options ?? {};
+    await this.ensureQueue(registration.name);
     await this.boss.work(
       registration.name,
       options,
@@ -117,6 +136,7 @@ class PgBossRuntime implements JobRuntime {
     if (!this.enabled || !this.started) {
       throw new Error("The job runtime is not started");
     }
+    await this.ensureQueue(name);
     await this.boss.schedule(name, cron, data, options);
   }
 }
@@ -124,10 +144,20 @@ class PgBossRuntime implements JobRuntime {
 export interface JobRuntimeOptions {
   readonly connectionString: string;
   readonly enabled?: boolean;
+  readonly onError?: (error: Error) => void;
 }
 
 export function createJobRuntime(options: JobRuntimeOptions): JobRuntime {
-  const boss = new PgBoss(options.connectionString);
+  // The pgboss schema is provisioned by a migration: the app role has no CREATE
+  // on the database, so pg-boss must not try to create it.
+  const boss = new PgBoss({
+    connectionString: options.connectionString,
+    schema: "pgboss",
+    createSchema: false,
+  });
+  // PgBoss is an EventEmitter; an "error" event with no listener would crash
+  // the process.
+  boss.on("error", options.onError ?? (() => undefined));
   return new PgBossRuntime(boss, options.enabled ?? true);
 }
 

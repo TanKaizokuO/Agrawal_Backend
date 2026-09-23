@@ -149,4 +149,4 @@ EXECUTE FUNCTION officer_processing_record_guard();
 -- Provisioning (outside this migration) must apply the following grants:
 -- GRANT INSERT, SELECT ON processing_record TO app_role;
 -- REVOKE UPDATE, DELETE ON processing_record FROM app_role;
--- GRANT SELECT, DELETE ON processing_record TO retention_role;
+-- GRANT EXECUTE ON FUNCTION purge_expired_processing_records() TO app_role;

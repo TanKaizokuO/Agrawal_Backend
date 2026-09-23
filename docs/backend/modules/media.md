@@ -71,7 +71,7 @@ When screening is switched on, `media.screenBacklog` runs every `UNSCREENED` ima
 
 ## Ownership transfer and cleanup
 
-- `media.reassign(tx, imageIds, { ownerMemberId, familyId? })` at Registration completion.
+- `media.reassign(tx, imageIds, { fromRegistrationId, ownerMemberId, familyId? })` at Registration completion. Every id must be owned by `fromRegistrationId`, otherwise nothing moves and it throws `IMAGE_NOT_OWNED`.
 - `media.deleteOwnedByRegistration(tx, registrationId)` when a Registration ends without completing.
 - `media.deleteAllForMember(tx, memberId)` on Erasure (Register hook).
 - Images never attached to anything within 24 hours of upload are deleted by `media.gcOrphans` (daily).
@@ -83,7 +83,7 @@ When screening is switched on, `media.screenBacklog` runs every `UNSCREENED` ima
 urlFor(imageId: string, viewer: Viewer): Promise<string | null>
 isVisibleToOthers(imageId: string): Promise<boolean>
 ownedBy(imageId: string, owner: Owner, purpose: ImagePurpose): Promise<boolean>
-reassign(tx, imageIds: string[], owner): Promise<void>
+reassign(tx, imageIds: string[], { fromRegistrationId, ownerMemberId, familyId? }): Promise<void>
 deleteOwnedByRegistration(tx, registrationId: string): Promise<void>
 deleteAllForMember(tx, memberId: string): Promise<void>
 onImageRemoved(handler): void   // owners (Register, Noticeboards) detach the image

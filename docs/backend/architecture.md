@@ -58,6 +58,7 @@ Agrawal_Backend/
     db.ts                 # Prisma client
     jobs.ts               # pg-boss instance, registerAllWorkers()
     clock.ts              # Clock port: now(); tests inject a fake clock
+    logger.ts             # createLogger(): pino with the redaction list; createApp wraps any supplied logger with it
     http/
       errors.ts           # AppError, error codes, error middleware
       validate.ts         # validate({ body, query, params }) middleware
@@ -220,7 +221,7 @@ Timed per-entity work (a Blood SOS widening step, a join request's expiry) uses 
 
 ## Time
 
-All storage in UTC (`timestamptz`). "Today" and "a day" mean the **IST calendar day** (`Asia/Kolkata`): the adult check (age ≥ 18 on today's IST date), the daily posting cap. `clock.ts` exposes `now()` and `todayIst()`; nothing calls `new Date()` directly outside it, so tests can move time.
+All storage in UTC (`timestamptz`). "Today" and "a day" mean the **IST calendar day** (`Asia/Kolkata`): the adult check (age ≥ 18 on today's IST date), the daily posting cap. `clock.ts` exposes `now()` and `todayIst()`; nothing calls `new Date()` directly outside it, so tests can move time. The one exception is retention purging: the purge functions compare `retain_until` with the database's `now()`, so the app role cannot make rows expire early by passing a later time.
 
 ## The Processing Record
 
@@ -228,11 +229,11 @@ An append-only audit table owned by the Officer module (see `modules/officer.md`
 
 Append-only is enforced by the database, not by convention (raw SQL migration in `prisma/sql/`):
 - The app role (`DATABASE_URL`) has `INSERT, SELECT` on `processing_record` and no `UPDATE`/`DELETE`.
-- A trigger raises on `UPDATE`, and on `DELETE` of any row whose `retain_until` is in the future; only the purge job's role deletes expired rows.
+- A trigger raises on `UPDATE`, and on `DELETE` of any row whose `retain_until` is in the future; the purge job deletes expired rows by calling the owner-owned `SECURITY DEFINER` function `public.purge_expired_processing_records()`, the only thing the app role may execute to delete.
 
 ## Logging
 
-pino with a redaction list covering: `req.headers.authorization`, `req.headers.cookie`, `*.firebaseIdToken`, `*.phoneE164`, `*.vpa`, `*.dateOfBirth`, `*.address*`, `*.bloodGroup`, `*.nominee*`, and every request body on `/v1/registration*`, `/v1/me*` and `/v1/officer*`. Log the route, status, duration, request ID and principal ID — never Member data. Logs are operational and rotate; they are **not** the processing record.
+pino with a redaction list covering: `req.headers.authorization`, `req.headers.cookie`, `res.headers["set-cookie"]`, the device token in `/v1/me/devices/:token` (URL and params), `*.firebaseIdToken`, `*.phoneE164`, `*.vpa`, `*.dateOfBirth`, `*.address*`, `*.bloodGroup`, `*.nominee*`, and every request body on `/v1/registration*`, `/v1/me*` and `/v1/officer*`. Log the route, status, duration, request ID and principal ID — never Member data. Logs are operational and rotate; they are **not** the processing record.
 
 ## Testing
 

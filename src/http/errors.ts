@@ -158,7 +158,7 @@ function languageFor(request: { get(name: string): string | undefined }): Suppor
   return language === "hi" || language?.startsWith("hi-") ? "hi" : "en";
 }
 
-function validationDetails(error: z.ZodError): { issues: Array<{ path: PropertyKey[]; message: string }> } {
+export function validationDetails(error: z.ZodError): { issues: Array<{ path: PropertyKey[]; message: string }> } {
   return {
     issues: error.issues.map((issue) => ({
       path: issue.path,

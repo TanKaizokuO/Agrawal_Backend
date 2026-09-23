@@ -25,9 +25,10 @@ function requireTestDatabaseUrl(name: "DATABASE_URL" | "DATABASE_MIGRATION_URL")
     throw new Error("Vitest database setup requires NODE_ENV=test.");
   }
 
-  const value = process.env[name];
+  const testName = name === "DATABASE_URL" ? "TEST_DATABASE_URL" : "TEST_DATABASE_MIGRATION_URL";
+  const value = process.env[testName] ?? process.env[name];
   if (!value) {
-    throw new Error(`${name} is required for the real-Postgres test setup.`);
+    throw new Error(`${testName} or ${name} is required for the real-Postgres test setup.`);
   }
 
   let url: URL;
@@ -79,12 +80,11 @@ async function truncateTables(): Promise<void> {
     throw new Error("The Vitest database has not been initialized.");
   }
 
-  const result = await adminPool.query<{ tablename: string }>(
-    `SELECT tablename
+  const result = await adminPool.query<{ schemaname: string; tablename: string }>(
+    `SELECT schemaname, tablename
        FROM pg_catalog.pg_tables
-      WHERE schemaname = $1
+      WHERE schemaname IN ('public', 'restricted')
         AND tablename <> '_prisma_migrations'`,
-    [testSchema],
   );
 
   if (result.rows.length === 0) {
@@ -92,16 +92,27 @@ async function truncateTables(): Promise<void> {
   }
 
   const tables = result.rows
-    .map(({ tablename }) => `${quoteIdentifier(testSchema)}.${quoteIdentifier(tablename)}`)
+    .map(({ schemaname, tablename }) => `${quoteIdentifier(schemaname)}.${quoteIdentifier(tablename)}`)
     .join(", ");
   await adminPool.query(`TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE`);
 }
 
+const testDatabaseProxy = new Proxy({} as Database, {
+  get(_target, prop) {
+    if (!database) {
+      throw new Error("The Vitest database has not been initialized.");
+    }
+    const value = (database as unknown as Record<string | symbol, unknown>)[prop];
+    if (typeof value === "function") {
+      return (...args: unknown[]): unknown =>
+        (value as (...innerArgs: unknown[]) => unknown).apply(database, args);
+    }
+    return value;
+  },
+});
+
 export function getTestDatabase(): Database {
-  if (!database) {
-    throw new Error("The Vitest database has not been initialized.");
-  }
-  return database;
+  return testDatabaseProxy;
 }
 
 beforeAll(async () => {

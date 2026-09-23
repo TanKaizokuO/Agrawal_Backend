@@ -24,8 +24,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS member_city_key_trgm_idx
 
 -- ---------------------------------------------------------------------------
 -- Restricted schema — holds data moved out of live tables on Erasure.
--- The app role can INSERT only; a separate retention role (used by the
--- purgeRestricted job) can SELECT and DELETE.
+-- The app role can INSERT only; the purgeRestricted job deletes expired rows
+-- through the owner-owned SECURITY DEFINER function restricted.purge_expired().
 -- ---------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS restricted;
 
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS restricted.consent_event (
 -- The role name is a placeholder; deployment provisioning replaces it.
 -- ---------------------------------------------------------------------------
 -- GRANT INSERT ON ALL TABLES IN SCHEMA restricted TO app_role;
--- GRANT SELECT, DELETE ON ALL TABLES IN SCHEMA restricted TO retention_role;
+-- GRANT EXECUTE ON FUNCTION restricted.purge_expired() TO app_role;
 -- ---------------------------------------------------------------------------
 -- Immutable identifiers and lineage.
 -- Family IDs, the minting pincode and Gotra are issued once and cannot be

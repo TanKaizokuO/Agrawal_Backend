@@ -13,6 +13,7 @@ import type {
   NoticeAuthorProjection,
   NoticesBusinessPort,
   NoticesConfig,
+  NoticeImagePurpose,
   NoticesMediaPort,
   NoticesNotificationsPort,
   NoticePushMessage,
@@ -97,6 +98,7 @@ interface TestContext {
   activeViewerId: string;
   businessFeePaise: number | null;
   screeningEnabled: boolean;
+  ownImage(memberId: string, purpose: NoticeImagePurpose): string;
 }
 
 function createTestContext(options?: {
@@ -207,7 +209,12 @@ function createTestContext(options?: {
     onMemberErased: () => {},
   };
 
+  const images = new Map<string, { readonly ownerMemberId: string; readonly purpose: NoticeImagePurpose }>();
   const mediaPort: NoticesMediaPort = {
+    ownedBy: (imageId, memberId, purpose) => {
+      const image = images.get(imageId);
+      return Promise.resolve(image?.ownerMemberId === memberId && image.purpose === purpose);
+    },
     urlFor: (imageId: string, viewerMemberId: string | null) => Promise.resolve().then(() => {
       if (screeningEnabled) {
         return `https://media.example.com/${imageId}.jpg`;
@@ -330,6 +337,11 @@ function createTestContext(options?: {
     },
     set screeningEnabled(v: boolean) {
       screeningEnabled = v;
+    },
+    ownImage(memberId: string, purpose: NoticeImagePurpose) {
+      const imageId = crypto.randomUUID();
+      images.set(imageId, { ownerMemberId: memberId, purpose });
+      return imageId;
     },
   };
 
@@ -1053,8 +1065,8 @@ describe("Notices Module Behavioral Specifications", () => {
 
   it("invariant 11: with screening off, photo URL returned for author only, null for others", async () => {
     const ctx = createTestContext();
-    const imageId = crypto.randomUUID();
     const authorId = "018f4b7c-3a15-7f20-9f2c-0123456789aa";
+    const imageId = ctx.ownImage(authorId, "SHOK_SANDESH_PHOTO");
     const otherViewerId = "018f4b7c-3a15-7f20-9f2c-0123456789bb";
 
     ctx.activeViewerId = authorId;
@@ -1076,6 +1088,49 @@ describe("Notices Module Behavioral Specifications", () => {
     ctx.activeViewerId = otherViewerId;
     const otherGet = await request(ctx.app).get(`/v1/notices/${noticeId}`);
     expect(responseBody<NoticeResponseBody>(otherGet).notice.imageUrl).toBeNull();
+  });
+
+  it("refuses a Shok Sandesh image the author does not own", async () => {
+    const ctx = createTestContext();
+    const authorId = "018f4b7c-3a15-7f20-9f2c-0123456789aa";
+    const otherMemberId = "018f4b7c-3a15-7f20-9f2c-0123456789bb";
+    const theirs = ctx.ownImage(otherMemberId, "SHOK_SANDESH_PHOTO");
+
+    ctx.activeViewerId = authorId;
+    const res = await request(ctx.app)
+      .post("/v1/notices")
+      .send({ board: "SHOK_SANDESH", bodyEn: "Notice with a borrowed photo", imageId: theirs });
+
+    expect(res.status).toBe(422);
+    expect(responseBody<ErrorResponseBody>(res).error.code).toBe("IMAGE_NOT_OWNED");
+    await expect(ctx.db.notice.findMany()).resolves.toHaveLength(0);
+  });
+
+  it("refuses a Business Listing image the author does not own or uploaded for another purpose", async () => {
+    const ctx = createTestContext();
+    const authorId = "018f4b7c-3a15-7f20-9f2c-0123456789aa";
+    const otherMemberId = "018f4b7c-3a15-7f20-9f2c-0123456789bb";
+    const listing = {
+      name: "Agrawal Sweets",
+      category: "GROCERY",
+      businessCity: "Indore",
+      businessPhone: "+919876543210",
+    };
+
+    ctx.activeViewerId = authorId;
+    for (const imageId of [
+      ctx.ownImage(otherMemberId, "BUSINESS_PHOTO"),
+      ctx.ownImage(authorId, "SHOK_SANDESH_PHOTO"),
+    ]) {
+      const res = await request(ctx.app).post("/v1/business-listings").send({ ...listing, imageId });
+      expect(res.status).toBe(422);
+      expect(responseBody<ErrorResponseBody>(res).error.code).toBe("IMAGE_NOT_OWNED");
+    }
+
+    const own = await request(ctx.app)
+      .post("/v1/business-listings")
+      .send({ ...listing, imageId: ctx.ownImage(authorId, "BUSINESS_PHOTO") });
+    expect(own.status).toBe(201);
   });
 
   it("invariant 12: with BUSINESS_LISTING_FEE_PAISE unset, all business listing routes fail 503 BOARD_NOT_OPEN", async () => {

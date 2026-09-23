@@ -6,6 +6,12 @@ import { RegistrationService, type RegistrationDeps, type RegistrationTx } from 
 import { SubmitBody, type SubmitInput } from "./schemas.js";
 import { getTestDatabase } from "../../../test/setup.js";
 
+// completed_member_id is a uuid column, so member fixtures must be UUIDs.
+const HEAD_ID = "018f4b7c-3a15-7f20-9f2c-000000000001";
+const OTHER_HEAD_ID = "018f4b7c-3a15-7f20-9f2c-000000000002";
+const FOUNDER_ID = "018f4b7c-3a15-7f20-9f2c-000000000003";
+const JOINER_ID = "018f4b7c-3a15-7f20-9f2c-000000000004";
+
 const clock = {
   now: () => new Date("2026-09-22T12:00:00.000Z"),
   todayIst: () => "2026-09-22",
@@ -74,27 +80,27 @@ function harness() {
     familyId: "family-1",
     publicId: "AGR-492001-00001",
     gotra: "GARG" as const,
-    headMemberId: "head-1",
+    headMemberId: HEAD_ID,
   };
 
   const register = {
     createFamilyWithHead: (): Promise<{ familyId: string; memberId: string }> => {
       familyCreations += 1;
       memberCreations += 1;
-      return Promise.resolve({ familyId: family.familyId, memberId: "member-1" });
+      return Promise.resolve({ familyId: family.familyId, memberId: FOUNDER_ID });
     },
     createMemberInFamily: (): Promise<{ memberId: string }> => {
       memberCreations += 1;
-      return Promise.resolve({ memberId: "member-2" });
+      return Promise.resolve({ memberId: JOINER_ID });
     },
     onFamilyGainedMember: () => Promise.resolve(),
     familyByPublicId: (publicId: string) =>
       Promise.resolve(publicId === family.publicId ? { id: family.familyId, gotra: family.gotra, status: "ACTIVE" } : null),
     familyOf: (memberId: string) => {
-      if (memberId === "other-head") {
-        return Promise.resolve({ familyId: "family-2", publicId: "AGR-492001-00002", gotra: "GARG" as const, headMemberId: "other-head" });
+      if (memberId === OTHER_HEAD_ID) {
+        return Promise.resolve({ familyId: "family-2", publicId: "AGR-492001-00002", gotra: "GARG" as const, headMemberId: OTHER_HEAD_ID });
       }
-      if (memberId === "head-1" || memberId === "member-1" || memberId === "member-2") return Promise.resolve(family);
+      if (memberId === HEAD_ID || memberId === FOUNDER_ID || memberId === JOINER_ID) return Promise.resolve(family);
       return Promise.resolve(null);
     },
     findPossibleDuplicates: () => Promise.resolve({ samePerson: [], sharedAddressHeads: [] }),
@@ -119,6 +125,8 @@ function harness() {
     refund: (...args: [RegistrationTx, string]): Promise<void> => {
       const paymentId = args[1];
       refunds.push(paymentId);
+      // Mirrors PaymentService.refund: once refunded, the payment is no longer CAPTURED.
+      payment.set(paymentId, { ...(payment.get(paymentId) ?? capturedPayment(paymentId)), status: "REFUND_PENDING" });
       return Promise.resolve();
     },
   } satisfies RegistrationDeps["payments"];
@@ -151,6 +159,13 @@ function harness() {
     identity,
     officer,
     jobs,
+    media: {
+      reassign: (): Promise<void> => Promise.resolve(),
+      deleteOwnedByRegistration: (): Promise<void> => Promise.resolve(),
+    },
+    romanizer: {
+      romanize: (text: string): Promise<string> => Promise.resolve(text),
+    },
   });
 
   async function createRegistration(phoneE164: string, status: "STARTED" | "PAID", paymentId?: string): Promise<string> {
@@ -200,7 +215,7 @@ describe("Registration public behavior", () => {
     expect(h.detailedFlags).toContainEqual({
       kind: "NO_PAYMENT_IDENTITY",
       subjectType: "MEMBER",
-      subjectId: "member-1",
+      subjectId: FOUNDER_ID,
     });
   });
 
@@ -230,8 +245,8 @@ describe("Registration public behavior", () => {
     expect(h.memberCreations).toBe(0);
 
     await expect(h.service.approveJoin(registrationId, "not-head")).rejects.toMatchObject({ code: "FORBIDDEN", httpStatus: 403 });
-    await expect(h.service.approveJoin(registrationId, "other-head")).rejects.toMatchObject({ code: "REGISTRATION_NOT_FOUND", httpStatus: 404 });
-    const completed = await h.service.approveJoin(registrationId, "head-1");
+    await expect(h.service.approveJoin(registrationId, OTHER_HEAD_ID)).rejects.toMatchObject({ code: "REGISTRATION_NOT_FOUND", httpStatus: 404 });
+    const completed = await h.service.approveJoin(registrationId, HEAD_ID);
 
     expect(completed.status).toBe("COMPLETED");
     expect(h.memberCreations).toBe(1);
@@ -277,6 +292,7 @@ describe("Registration public behavior", () => {
     ).rejects.toMatchObject({
       code: "VALIDATION_FAILED",
       httpStatus: 400,
+      details: { issues: [expect.objectContaining({ path: ["familyPhotoImageId"] })] },
     });
   });
 });

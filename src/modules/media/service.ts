@@ -314,20 +314,34 @@ export class MediaService {
     return this.ownedBy(imageId, { registrationId }, purpose);
   }
 
+  /**
+   * Moves images uploaded during a registration to the new member. Every id
+   * must belong to `fromRegistrationId`; otherwise nothing is moved.
+   */
   public async reassign(
     tx: MediaTxClient,
     imageIds: readonly string[],
-    owner: { readonly ownerMemberId: string; readonly familyId?: string },
+    owner: {
+      readonly fromRegistrationId: string;
+      readonly ownerMemberId: string;
+      readonly familyId?: string;
+    },
   ): Promise<void> {
     if (imageIds.length === 0) return;
-    await tx.image.updateMany({
-      where: { id: { in: [...imageIds] }, status: { not: "REMOVED" } },
+    const ids = [...new Set(imageIds)];
+    const moved = await tx.image.updateMany({
+      where: {
+        id: { in: ids },
+        ownerRegistrationId: owner.fromRegistrationId,
+        status: { not: "REMOVED" },
+      },
       data: {
         ownerRegistrationId: null,
         ownerMemberId: owner.ownerMemberId,
         familyId: owner.familyId ?? null,
       },
     });
+    if (moved.count !== ids.length) throw new AppError("IMAGE_NOT_OWNED", 422);
   }
   public async replace(
     tx: MediaTxClient,
@@ -391,20 +405,19 @@ export class MediaService {
       },
     });
     if (images.length === 0) return;
-    for (const image of images) {
-      if (image.status !== "REMOVED") {
-        await this.invokeRemovedHandlers(tx, {
-          imageId: image.id,
-          purpose: image.purpose,
-          ownerMemberId: image.ownerMemberId,
-          familyId: image.familyId,
-          reason: "ERASURE",
-          removedBy: "SYSTEM",
-        });
-      }
+    const activeImages = images.filter((image) => image.status !== "REMOVED");
+    for (const image of activeImages) {
+      await this.invokeRemovedHandlers(tx, {
+        imageId: image.id,
+        purpose: image.purpose,
+        ownerMemberId: image.ownerMemberId,
+        familyId: image.familyId,
+        reason: "ERASURE",
+        removedBy: "SYSTEM",
+      });
     }
     await tx.image.deleteMany({ where: { ownerMemberId: memberId } });
-    await this.enqueueDeletes(images.map((image) => image.s3Key));
+    await this.enqueueDeletes(activeImages.map((image) => image.s3Key));
   }
 
   public async gcOrphans(): Promise<number> {

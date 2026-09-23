@@ -877,8 +877,8 @@ export class OfficerService implements ProcessingRecordWriter {
   }
 
   async purgeExpiredProcessingRecords(): Promise<void> {
-    await this.db.processingRecord.deleteMany({
-      where: { retainUntil: { lt: this.clock.now() } },
-    });
+    // The app role cannot DELETE processing records; this owner-owned SECURITY
+    // DEFINER function deletes only those whose retain_until has passed.
+    await this.db.$executeRaw`SELECT public.purge_expired_processing_records()`;
   }
 }

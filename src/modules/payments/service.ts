@@ -6,6 +6,7 @@ import type { PaymentGateway, PaymentProviderPayment } from "../../adapters/port
 import type { JobRuntime } from "../../jobs.js";
 import { AppError } from "../../http/errors.js";
 import { isRecord } from "./guards.js";
+import { paymentCapturedJobName, type PaymentCapturedPayload } from "./events.js";
 import type {
   PaymentDatabase,
   PaymentRow,
@@ -250,7 +251,7 @@ export class PaymentService {
       // lock also closes the read-then-create race when two HTTP retries arrive
       // on different workers before either Payment row is visible.
       const lockKey = `payment-order:${input.purpose}:${input.subjectId}`;
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const captured = await tx.payment.findFirst({
         where: {
           purpose: input.purpose,
@@ -542,9 +543,10 @@ export class PaymentService {
     });
     if (changed.count === 0) return;
 
+    const captured: PaymentCapturedPayload = { paymentId: payment.id, subjectId: payment.subjectId };
     await this.jobs.send(
-      `payments.captured.${payment.purpose}`,
-      { paymentId: payment.id, subjectId: payment.subjectId },
+      paymentCapturedJobName(payment.purpose),
+      captured,
       JOB_RETRY_OPTIONS,
     );
   }
@@ -680,7 +682,7 @@ export class PaymentService {
 
     await this.db.$transaction(async (tx) => {
       const lockKey = `payment-refund:${refundId}`;
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const refund = await tx.refund.findUnique({ where: { id: refundId } });
       if (
         refund === null ||

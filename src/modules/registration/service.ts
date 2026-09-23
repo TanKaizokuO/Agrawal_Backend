@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { Prisma, type PrismaClient } from "../../generated/prisma/client.js";
-import { AppError } from "../../http/errors.js";
+import { AppError, validationDetails } from "../../http/errors.js";
 import type { Clock } from "../../clock.js";
 import type { Romanizer } from "../../adapters/ports.js";
 import type { JobRuntime } from "../../jobs.js";
@@ -76,7 +76,11 @@ export interface RegistrationMediaPort {
   reassign(
     tx: Tx,
     imageIds: readonly string[],
-    owner: { readonly ownerMemberId: string; readonly familyId?: string },
+    owner: {
+      readonly fromRegistrationId: string;
+      readonly ownerMemberId: string;
+      readonly familyId?: string;
+    },
   ): Promise<void>;
   deleteOwnedByRegistration(tx: Tx, registrationId: string): Promise<void>;
 }
@@ -96,9 +100,9 @@ export interface RegistrationDeps {
   readonly payments: PaymentsPort;
   readonly identity: IdentityPort;
   readonly jobs: JobRuntime;
-  readonly media?: RegistrationMediaPort;
+  readonly media: RegistrationMediaPort;
   readonly officer: RegistrationOfficerPort;
-  readonly romanizer?: Romanizer;
+  readonly romanizer: Romanizer;
 }
 
 export interface FoundingResult {
@@ -215,9 +219,9 @@ export class RegistrationService implements RegistrationIdentityPort {
   private readonly payments: PaymentsPort;
   private readonly identity: IdentityPort;
   private readonly jobs: JobRuntime;
-  private readonly media: RegistrationMediaPort | undefined;
+  private readonly media: RegistrationMediaPort;
   private readonly officer: RegistrationOfficerPort;
-  private readonly romanizer: Romanizer | undefined;
+  private readonly romanizer: Romanizer;
 
   constructor(deps: RegistrationDeps) {
     this.db = deps.db;
@@ -242,7 +246,7 @@ export class RegistrationService implements RegistrationIdentityPort {
     phoneE164: string,
   ): Promise<{ readonly registrationId: string }> {
     if (!hasRegistrationTx(tx)) throw new AppError("INTERNAL", 500);
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-phone:${phoneE164}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-phone:${phoneE164}`}))`;
     const now = this.clock.now();
     const existing = await tx.registration.findFirst({
       where: { phoneE164, status: { in: ["STARTED", "PAID", "AWAITING_HEAD"] } },
@@ -392,7 +396,9 @@ export class RegistrationService implements RegistrationIdentityPort {
     phoneE164: string,
     input: SubmitInput,
   ): Promise<SubmitResult> {
-    const parsed = SubmitBody.parse(input);
+    const result = SubmitBody.safeParse(input);
+    if (!result.success) throw new AppError("VALIDATION_FAILED", 400, validationDetails(result.error));
+    const parsed = result.data;
     const current = await this.db.registration.findUnique({ where: { id: registrationId } });
     if (current === null || current.phoneE164 !== phoneE164) {
       throw new AppError("REGISTRATION_NOT_FOUND", 404);
@@ -479,7 +485,7 @@ export class RegistrationService implements RegistrationIdentityPort {
       const profile = this.profileFromJson(registration.submittedProfile);
       const createInput = await this.createMemberInput(registration.phoneE164, profile);
       const created = await this.register.createMemberInFamily(tx, family.familyId, createInput);
-      await this.reassignImages(tx, profile, created.memberId, family.familyId);
+      await this.reassignImages(tx, profile, registration.id, created.memberId, family.familyId);
       await this.payments.markConsumed(tx, registration.paymentId);
       await this.identity.promoteToMember(tx, registration.id, created.memberId);
       const completedAt = this.clock.now();
@@ -591,7 +597,6 @@ export class RegistrationService implements RegistrationIdentityPort {
     const textHash = createHash("sha256").update(normalized).digest("hex");
     const cached = await this.db.romanizationCache.findUnique({ where: { textHash } });
     if (cached !== null) return cached.latin;
-    if (this.romanizer === undefined) throw new AppError("UPSTREAM_UNAVAILABLE", 503);
     let latin: string;
     try {
       latin = (await this.romanizer.romanize(normalized)).trim();
@@ -631,6 +636,12 @@ export class RegistrationService implements RegistrationIdentityPort {
 
     return this.db.$transaction(async (tx) => {
       const registration = await this.lockedRegistration(tx, registrationId);
+      // A concurrent submit may have completed while this one waited on the lock.
+      if (
+        registration?.status === "COMPLETED"
+        && registration.completedMemberId !== null
+        && registration.phoneE164 === profile.phoneE164
+      ) return this.completedResult(registration.completedMemberId);
       if (
         registration === null
         || registration.status !== "PAID"
@@ -676,7 +687,7 @@ export class RegistrationService implements RegistrationIdentityPort {
           relatedIds: possibleDuplicates.sharedAddressHeads,
         });
       }
-      await this.reassignImages(tx, input, created.memberId, created.familyId);
+      await this.reassignImages(tx, input, registration.id, created.memberId, created.familyId);
       await this.payments.markConsumed(tx, paymentId);
       await this.identity.promoteToMember(tx, registration.id, created.memberId);
       const completedAt = this.clock.now();
@@ -725,7 +736,7 @@ export class RegistrationService implements RegistrationIdentityPort {
         || registration.paymentId !== paymentId
         || registration.phoneE164 !== profile.phoneE164
       ) throw new AppError("REGISTRATION_NOT_PAID", 409);
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-family:${family.id}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-family:${family.id}`}))`;
       const pending = await tx.registration.findMany({
         where: { joinFamilyId: family.id, status: "AWAITING_HEAD" },
         select: { id: true },
@@ -820,6 +831,7 @@ export class RegistrationService implements RegistrationIdentityPort {
   private async reassignImages(
     tx: Tx,
     input: SubmitInput | PreparedProfile,
+    fromRegistrationId: string,
     ownerMemberId: string,
     familyId: string,
   ): Promise<void> {
@@ -827,8 +839,7 @@ export class RegistrationService implements RegistrationIdentityPort {
       ? uniqueIds([input.photoImageId, input.familyPhotoImageId ?? undefined])
       : uniqueIds([input.photoImageId]);
     if (ids.length === 0) return;
-    if (this.media === undefined) throw new AppError("IMAGE_NOT_OWNED", 422);
-    await this.media.reassign(tx, ids, { ownerMemberId, familyId });
+    await this.media.reassign(tx, ids, { fromRegistrationId, ownerMemberId, familyId });
   }
 
   private async assertHeadForRegistration(
@@ -924,7 +935,7 @@ export class RegistrationService implements RegistrationIdentityPort {
   }
 
   private async lockedRegistration(tx: Tx, id: string) {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration:${id}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration:${id}`}))`;
     return tx.registration.findUnique({ where: { id } });
   }
 
@@ -940,7 +951,7 @@ export class RegistrationService implements RegistrationIdentityPort {
     if (refundReason !== undefined && registration.paymentId !== null) {
       await this.payments.refund(tx, registration.paymentId, refundReason, { kind: "SYSTEM" });
     }
-    if (this.media !== undefined) await this.media.deleteOwnedByRegistration(tx, registration.id);
+    await this.media.deleteOwnedByRegistration(tx, registration.id);
     const now = this.clock.now();
     await tx.registration.update({
       where: { id: registration.id },
