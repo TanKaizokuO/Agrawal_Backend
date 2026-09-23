@@ -85,7 +85,7 @@ Production runs at `https://backend.agrawal.app` on EC2. `.github/workflows/depl
 
 Required infrastructure:
 
-- RDS PostgreSQL 18 databases for staging and production (ADR-0029). One PostgreSQL 18.3 instance in ap-south-1 was previously reachable with enforced TLS, but no local credentials remain: restore access with separated migration/runtime roles, assign it to an environment or create per-environment databases and restrict network access before it holds real data.
+- RDS PostgreSQL 18 databases for staging and production (ADR-0029). One PostgreSQL 18.3 instance in ap-south-1 is reachable with enforced TLS, and local credentials exist again (see §1). Assign it to an environment or create per-environment databases and restrict network access before it holds real data.
 - Private S3 media buckets with Block Public Access, encryption, lifecycle policy, and least-privilege API access.
 - ECR repositories for staging and production images.
 - EC2 host with Docker/Caddy and SSM Agent.
