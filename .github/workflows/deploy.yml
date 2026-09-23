@@ -34,7 +34,7 @@ jobs:
       - name: Verify AWS identity (instance role)
         run: aws sts get-caller-identity
 
-      - name: Fetch .env from Secrets Manager
+      - name: Fetch env from Secrets Manager
         run: |
           set -euo pipefail
           umask 077
@@ -43,9 +43,9 @@ jobs:
             --region "$AWS_REGION" \
             --query SecretString \
             --output text \
-          | jq -r 'to_entries[] | "\(.key)=\(.value | tostring | @json)"' > .env
-          test -s .env || { echo "::error::.env is empty"; exit 1; }
-          echo "Loaded $(wc -l < .env) variables"
+          | jq 'with_entries(.value |= (if type == "string" then . else tojson end))' > .env.json
+          jq -e 'length > 0' .env.json > /dev/null || { echo "::error::secret is empty"; exit 1; }
+          echo "Loaded $(jq 'length' .env.json) variables"
 
       - name: Install dependencies
         run: npm ci
@@ -59,7 +59,7 @@ jobs:
       - name: Run database migrations
         run: |
           set -euo pipefail
-          set -a && . ./.env && set +a
+          eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' .env.json)"
           npm run prisma:migrate
 
       - name: Remove dev dependencies
@@ -75,7 +75,7 @@ jobs:
             --exclude '.github' \
             --exclude '.gitattributes' \
             ./ "$TARGET_DIR/"
-          chmod 600 "$TARGET_DIR/.env"
+          chmod 600 "$TARGET_DIR/.env.json"
 
       - name: Deploy with PM2
         run: |
@@ -90,25 +90,34 @@ jobs:
             apps: [{
               name: "$APP_NAME",
               cwd: "$TARGET_DIR",
-              script: "$ENTRY_FILE",
-              node_args: "--env-file=.env",
-              env: { NODE_ENV: "production", PORT: "$APP_PORT" },
+              script: "/usr/bin/node",
+              args: "$ENTRY_FILE",
+              interpreter: "none",
+              env: Object.assign({}, require("./.env.json"), { NODE_ENV: "production", PORT: "$APP_PORT" }),
               max_memory_restart: "500M"
             }]
           };
           EOF
 
-          pm2 startOrReload ecosystem.config.cjs --update-env
+          pm2 delete "$APP_NAME" 2>/dev/null || true
+          pm2 start ecosystem.config.cjs
           pm2 save
 
       - name: Health check
         run: |
-          for i in $(seq 1 10); do
-            curl -fsS "http://127.0.0.1:$APP_PORT/health" && exit 0
+          for i in $(seq 1 20); do
+            curl -fsS "http://127.0.0.1:$APP_PORT/healthz" && exit 0
             sleep 3
           done
           echo "::error::App did not become healthy"
-          pm2 logs "$APP_NAME" --lines 50 --nostream
+          echo "----- pm2 describe -----"
+          pm2 describe "$APP_NAME" || true
+          echo "----- app logs -----"
+          pm2 logs "$APP_NAME" --lines 50 --nostream || true
+          echo "----- pm2 daemon log -----"
+          tail -30 "$HOME/.pm2/pm2.log" || true
+          echo "----- listening ports -----"
+          sudo ss -ltnp | grep node || true
           exit 1
 
       - name: Reload Nginx
@@ -116,4 +125,4 @@ jobs:
 
       - name: Clean workspace secrets
         if: always()
-        run: rm -f .env
+        run: rm -f .env.json
