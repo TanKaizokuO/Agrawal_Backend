@@ -254,7 +254,7 @@ export interface MemberSuspensionView {
 }
 
 export interface MeResponse {
-  readonly self: MemberProjection;
+  readonly member: MemberProjection;
   readonly family: {
     readonly publicId: string;
     readonly gotra: Gotra;

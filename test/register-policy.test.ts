@@ -152,5 +152,9 @@ describe("Register visibility policy", () => {
       reason: "REPORTS",
       noticeId: "notice-1",
     });
+    // openapi.json names the caller's own projection `member`; the Flutter
+    // client fails to deserialize /v1/me when it is sent under any other key.
+    expect(Object.keys(me)).toContain("member");
+    expect(Object.keys(me)).not.toContain("self");
   });
 });

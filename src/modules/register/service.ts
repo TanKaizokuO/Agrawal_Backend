@@ -726,7 +726,7 @@ export class RegisterService {
       : await this.suspensionResolver.resolveActiveSuspension(memberId);
 
     return {
-      self: selfProjection,
+      member: selfProjection,
       family: {
         publicId: family?.publicId ?? "",
         gotra: family?.gotra ?? "GARG",
