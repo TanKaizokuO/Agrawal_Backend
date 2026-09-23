@@ -364,7 +364,7 @@ export class MediaService {
         status: "REMOVED",
         statusReason: "REPLACED",
         removedAt: this.deps.clock.now(),
-        removedBy: "SYSTEM",
+        removedBy: null,
       },
     });
     await this.invokeRemovedHandlers(tx, {
@@ -405,20 +405,19 @@ export class MediaService {
       },
     });
     if (images.length === 0) return;
-    for (const image of images) {
-      if (image.status !== "REMOVED") {
-        await this.invokeRemovedHandlers(tx, {
-          imageId: image.id,
-          purpose: image.purpose,
-          ownerMemberId: image.ownerMemberId,
-          familyId: image.familyId,
-          reason: "ERASURE",
-          removedBy: "SYSTEM",
-        });
-      }
+    const activeImages = images.filter((image) => image.status !== "REMOVED");
+    for (const image of activeImages) {
+      await this.invokeRemovedHandlers(tx, {
+        imageId: image.id,
+        purpose: image.purpose,
+        ownerMemberId: image.ownerMemberId,
+        familyId: image.familyId,
+        reason: "ERASURE",
+        removedBy: "SYSTEM",
+      });
     }
     await tx.image.deleteMany({ where: { ownerMemberId: memberId } });
-    await this.enqueueDeletes(images.map((image) => image.s3Key));
+    await this.enqueueDeletes(activeImages.map((image) => image.s3Key));
   }
 
   public async gcOrphans(): Promise<number> {

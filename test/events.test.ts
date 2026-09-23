@@ -372,9 +372,9 @@ describe("Events pass protocol", () => {
     const pieces = qrPayload.split(".");
     const decoded = z.record(z.string(), z.unknown()).parse(JSON.parse(Buffer.from(pieces[1] ?? "", "base64url").toString("utf8")));
     if (pieces[0] === undefined || pieces[2] === undefined) throw new Error("Malformed test payload");
-    const tampered = `${pieces[0]}.${Buffer.from(JSON.stringify(decoded), "utf8").toString("base64url")}.${pieces[2]}`;
-    expect(verifyEventPass(tampered, [keySet.verification])).toEqual({ valid: false, reason: "BAD_SIGNATURE" });
-    expect(verifyEventPass(qrPayload, [keySet.verification], { now: new Date("2024-10-11T00:00:00.000Z") })).toEqual({ valid: false, reason: "EXPIRED" });
+    const tampered = `${pieces[0]}.${Buffer.from(JSON.stringify({ ...decoded, n: "Tampered" }), "utf8").toString("base64url")}.${pieces[2]}`;
+    expect(verifyEventPass(tampered, [keySet.verification], { now: new Date("2024-10-10T00:00:00.000Z") })).toEqual({ valid: false, reason: "BAD_SIGNATURE" });
+    expect(verifyEventPass(qrPayload, [keySet.verification], { now: new Date("2024-10-12T00:00:00.000Z") })).toEqual({ valid: false, reason: "EXPIRED" });
     expect(verifyEventPass(qrPayload, [keySet.verification], { now: new Date(1_728_648_000 * 1000) })).toEqual({ valid: false, reason: "EXPIRED" });
     expect(verifyEventPass(qrPayload, [keySet.verification], { revokedPassIds: new Set(["pass"]), now: new Date("2024-10-10T00:00:00.000Z") })).toEqual({ valid: false, reason: "REVOKED" });
     expect(deterministicPassPayload(payload)).toContain('"n":"Ramesh"');

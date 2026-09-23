@@ -236,9 +236,10 @@ export class RegisterService {
     this.romanizer = deps.romanizer;
     this.processingRecord = deps.processingRecord;
     this.nomineeReadAuthorizer = deps.nomineeReadAuthorizer;
+    const resolver = deps.suspensionResolver as unknown;
     if (
-      typeof deps.suspensionResolver !== "function"
-      && typeof deps.suspensionResolver.resolveActiveSuspension !== "function"
+      typeof resolver !== "function"
+      && typeof (resolver as { resolveActiveSuspension?: unknown } | null | undefined)?.resolveActiveSuspension !== "function"
     ) {
       throw new Error("RegisterService requires suspensionResolver");
     }

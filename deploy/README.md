@@ -47,6 +47,7 @@ Sensitive values are stored as `SecureString` encrypted with KMS.
 - `/agrawal/<env>/EVENT_PASS_SIGNING_KEYS` (Stage 2)
 - `/agrawal/<env>/SIGHTENGINE_API_USER` (Stage 2)
 - `/agrawal/<env>/SIGHTENGINE_API_SECRET` (Stage 2)
+- `/agrawal/<env>/ERASURE_SELF_SERVICE` (optional; defaults to `false`)
 
 ---
 
