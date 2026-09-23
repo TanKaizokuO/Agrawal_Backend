@@ -51,7 +51,10 @@ jobs:
         run: npm ci
 
       - name: Generate Prisma client
-        run: npm run prisma:generate
+        run: |
+          set -euo pipefail
+          eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' .env.json)"
+          npm run prisma:generate
 
       - name: Build App
         run: npm run build
