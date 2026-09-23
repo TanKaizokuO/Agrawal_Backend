@@ -27,9 +27,12 @@ services:
     # POSIX chmod semantics. Keep local database state in RAM so Docker never
     # writes it to the root partition; container recreation starts clean.
     # PostgreSQL 18+ images keep PGDATA under /var/lib/postgresql/18/docker and
-    # refuse to start with a mount at /var/lib/postgresql/data.
+    # refuse to start with a mount at /var/lib/postgresql/data. mode=1777
+    # matches the image's own /var/lib/postgresql: the entrypoint only chowns
+    # PGDATA, so a root-owned 0700 parent stops it creating 18/. PGDATA itself
+    # still ends up postgres-owned with mode 0700.
     tmpfs:
-      - /var/lib/postgresql:rw,noexec,nosuid,size=1g,mode=0700
+      - /var/lib/postgresql:rw,noexec,nosuid,size=1g,mode=1777
     volumes:
       - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
     healthcheck:

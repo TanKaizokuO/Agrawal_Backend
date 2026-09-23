@@ -24,8 +24,6 @@ Remaining checks:
 
 Local fallback status (22 September 2026): the project PostgreSQL Docker container and `postgres:16-alpine` image were removed because this workstation must not write Docker layers to the root filesystem. No host PostgreSQL server/client is installed. Further local database verification requires a root-safe PostgreSQL runtime with binaries/cache on the WD workspace and data in RAM, or the separated non-production RDS database.
 
-Known defect, local compose (found in code review, 23 September 2026): `docker compose up` cannot start the `postgres:18-alpine` service. `docker-compose.yml` mounts the tmpfs at `/var/lib/postgresql` with `mode=0700`. The tmpfs is root-owned, and the entrypoint only `chown`s `PGDATA` (`/var/lib/postgresql/18/docker`), never its parent, so it cannot create `18/` and exits with `mkdir: can't create directory '/var/lib/postgresql/18/': Permission denied`. Reproduced with `docker run --tmpfs /var/lib/postgresql:rw,noexec,nosuid,size=1g,mode=0700 postgres:18-alpine`. Fix: change the tmpfs option to `mode=1777`, which matches the image's own `/var/lib/postgresql`. `PGDATA` itself still ends up postgres-owned with mode 0700, and the same command with `mode=1777` reached "ready to accept connections". CI is unaffected because its service container mounts no data directory. The fix has not been applied yet.
-
 ## 2. Operator facts required before staging
 
 Resolved operator decisions are recorded in ADR-0026, ADR-0027, ADR-0028 and ADR-0029.
