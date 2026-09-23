@@ -10,7 +10,7 @@ The cross-cutting shape of the API (`Agrawal_Backend/`). Module-specific rules l
 | Language | TypeScript, `strict: true`, `noUncheckedIndexedAccess: true` | ESM (`"type": "module"`), like the repo root. |
 | HTTP | Express 5 | Express 5 forwards rejected promises from async handlers to the error middleware; no wrapper needed. |
 | Validation + contract | zod | Every request body, query and params object and every response body is a zod schema. OpenAPI 3.1 is generated from those schemas with `@asteasolutions/zod-to-openapi`. At install, confirm the generator's supported zod major and pin zod to it. |
-| Database | PostgreSQL 16 on RDS (`db.t3.small`, single-AZ) | Extensions: `pg_trgm`, `citext`. |
+| Database | PostgreSQL 18 on RDS (`db.t3.small`, single-AZ; ADR-0029) | Extensions: `pg_trgm`, `citext`. |
 | ORM | Prisma, **`prisma` and `@prisma/client` pinned to the same exact stable version** | ADR-0014 §13: an unpinned `prisma` resolves to a release candidate. Use Prisma's multi-file schema: one `.prisma` file per module under `prisma/schema/`. Follow Prisma's current Express guide for the driver-adapter setup of the pinned major. |
 | Jobs | pg-boss | Queue lives in the same Postgres. Jobs are enqueued inside the domain transaction where the domain change happens. |
 | Logging | pino + pino-http | JSON logs, request ID on every line, redaction list below. |

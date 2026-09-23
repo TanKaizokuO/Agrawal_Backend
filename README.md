@@ -27,7 +27,7 @@ This service owns the single HTTP contract that all client applications (`Agrawa
 
 - **Runtime**: Node.js `>=24.0.0`
 - **Framework**: Express 5 (TypeScript, ESM)
-- **Database & ORM**: PostgreSQL (repository targets PostgreSQL 16; live AWS RDS instance is 18.3) + Prisma 7 (pg adapter)
+- **Database & ORM**: PostgreSQL 18 (matches the AWS RDS 18.3 instance, ADR-0029) + Prisma 7 (pg adapter)
 - **Background Jobs**: `pg-boss` queue runner
 - **API Spec & Validation**: Zod v4 schemas + `@asteasolutions/zod-to-openapi` (OpenAPI v3.1)
 - **Authentication**: Firebase Phone Auth exchange → Secure HTTP-only session cookies / Bearer tokens
@@ -62,7 +62,7 @@ test/                     Integration test suite (Vitest)
 ### Prerequisites
 - **Node.js**: `>=24.0.0`
 - **npm**: `>=10.0.0`
-- **PostgreSQL**: PostgreSQL 16+ (local Docker or AWS RDS instance)
+- **PostgreSQL**: PostgreSQL 18 (local Docker or AWS RDS instance)
 
 ### Setup
 

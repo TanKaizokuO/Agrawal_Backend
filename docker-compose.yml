@@ -1,5 +1,5 @@
 # Local development environment for Agrawal backend (apps/api)
-# As specified in docs/backend/architecture.md, local compose exposes PostgreSQL 16 ONLY.
+# As specified in docs/backend/architecture.md, local compose exposes PostgreSQL 18 ONLY (matches RDS, ADR-0029).
 # The Node.js API runs locally on the host machine against this database.
 #
 # Connection URLs:
@@ -11,7 +11,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: agrawal-postgres-local
     restart: unless-stopped
     environment:
@@ -26,8 +26,10 @@ services:
     # The WD Black workspace is NTFS and cannot satisfy PostgreSQL's required
     # POSIX chmod semantics. Keep local database state in RAM so Docker never
     # writes it to the root partition; container recreation starts clean.
+    # PostgreSQL 18+ images keep PGDATA under /var/lib/postgresql/18/docker and
+    # refuse to start with a mount at /var/lib/postgresql/data.
     tmpfs:
-      - /var/lib/postgresql/data:rw,noexec,nosuid,size=1g,mode=0700
+      - /var/lib/postgresql:rw,noexec,nosuid,size=1g,mode=0700
     volumes:
       - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
     healthcheck:

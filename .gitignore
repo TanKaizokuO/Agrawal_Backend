@@ -9,6 +9,7 @@ build/
 .env
 .env.local
 .env.*
+env.json
 !.env.example
 
 # Agent / Tooling
@@ -37,3 +38,6 @@ coverage/
 .vscode/
 *.swp
 *.swo
+
+# Firebase service account keys
+*firebase-adminsdk*.json

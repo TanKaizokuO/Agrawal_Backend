@@ -11,18 +11,18 @@ The Stage 1 and Stage 2 backend, Flutter transport client, deployment assets, da
 - `npm run openapi` passes and regenerates `Agrawal_Backend/openapi.json` identically (re-verified 21 September 2026).
 - Prisma format, validation, and client generation pass (re-verified 21 September 2026).
 - The API runtime composition smoke instantiated every service, adapter, route, and worker, then closed cleanly.
-- Flutter dependency resolution passes; 261 Flutter tests pass (re-verified 21 September 2026 from the repository root); the Flutter web release build passes.
+- Flutter dependency resolution passes; 415 Flutter tests pass (re-verified 23 September 2026 in `Agrawal_App/`); the Flutter web release build passes.
 - The signed production release Android App Bundle (`app.agrawal.agrawal_samaj`, targetSdk 36, versionCode 1, release upload keystore) is built and verified (commits `5d42646`, `9678e3a`, `docs/compliance/play-store-compliance.md`). In addition, the dedicated closed-testing release bundle (`build/app/outputs/bundle/release/app-release-closed-test.aab`, built with `--dart-define=CLOSED_TEST=true`) is built and jarsigner verified with the release upload keystore for external testing and Play review.
 - The `Agrawal_Frontend` prototype production build passes (re-verified 21 September 2026).
 - The final source security review findings were fixed: persistent route quotas, pre-decode media concurrency control, archival-request/member binding, Officer erasure-request binding, opaque Blood SOS pushes, token ownership protection, Firebase project validation, recurring maintenance schedules, restricted-schema grants, and event-pass expiry equality.
 
 ## 1. PostgreSQL required to finish runtime verification
 
-A reachable instance was previously verified: AWS RDS PostgreSQL 18.3 at `database-1.cvm24i0yc44i.ap-south-1.rds.amazonaws.com:5432` (ap-south-1, publicly accessible, SSL enforced by pg_hba). On 21 September 2026, TLS `verify-full` with the RDS global CA bundle connected, and `pg_trgm`, `citext`, and `unaccent` were available but not installed. No `.env` exists now; restore access only with separated migration/runtime roles rather than the master `postgres` role.
+A reachable instance was previously verified: AWS RDS PostgreSQL 18.3 at `database-1.cvm24i0yc44i.ap-south-1.rds.amazonaws.com:5432` (ap-south-1, publicly accessible, SSL enforced by pg_hba). On 21 September 2026, TLS `verify-full` with the RDS global CA bundle connected, and `pg_trgm`, `citext`, and `unaccent` were available but not installed. A local `.env` exists again (23 September 2026). It must use separated migration/runtime roles, not the master `postgres` role.
 
 Connection-string constraint: the repo's `pg` v8 maps `sslmode=require` to full certificate verification, so URLs must use `sslmode=verify-full&sslrootcert=<absolute path to global-bundle.pem>`.
 
-Version mismatch: the repository targets PostgreSQL 16; the instance runs 18.3. Confirm Prisma 7.10 and the foundation migration behave identically on 18, or pin the engine version, before staging.
+Engine version: PostgreSQL 18 is the project version (ADR-0029, 23 September 2026), matching this 18.3 instance; CI and local compose use `postgres:18-alpine`. Prisma 7.10 and both migrations are not yet verified on 18.3; the checks below do that.
 
 Remaining checks:
 
@@ -35,6 +35,8 @@ Remaining checks:
 7. Confirm all 13 recurring pg-boss schedules exist once and execute successfully.
 
 Local fallback status (22 September 2026): the project PostgreSQL Docker container and `postgres:16-alpine` image were removed because this workstation must not write Docker layers to the root filesystem. No host PostgreSQL server/client is installed. Further local database verification requires a root-safe PostgreSQL runtime with binaries/cache on the WD workspace and data in RAM, or the separated non-production RDS database.
+
+Known defect, local compose (found in code review, 23 September 2026): `docker compose up` cannot start the `postgres:18-alpine` service. `docker-compose.yml` mounts the tmpfs at `/var/lib/postgresql` with `mode=0700`. The tmpfs is root-owned, and the entrypoint only `chown`s `PGDATA` (`/var/lib/postgresql/18/docker`), never its parent, so it cannot create `18/` and exits with `mkdir: can't create directory '/var/lib/postgresql/18/': Permission denied`. Reproduced with `docker run --tmpfs /var/lib/postgresql:rw,noexec,nosuid,size=1g,mode=0700 postgres:18-alpine`. Fix: change the tmpfs option to `mode=1777`, which matches the image's own `/var/lib/postgresql`. `PGDATA` itself still ends up postgres-owned with mode 0700, and the same command with `mode=1777` reached "ready to accept connections". CI is unaffected because its service container mounts no data directory. The fix has not been applied yet.
 
 ## 2. Operator facts required before staging
 
@@ -55,7 +57,7 @@ Still owed before staging:
 
 - The Google Cloud project for romanization (M2).
 - A decision on re-signing `feature-list.md`, which now diverges from ADR-0022, ADR-0025 and ADR-0026.
-- Resolving the PostgreSQL 16 vs. 18.3 engine question from §1 before staging migrations.
+- A decision on the API hostname. The deployed API answers at `https://backend.agrawal.app` (`/healthz` and `/readyz` return 200 on 23 September 2026). `api.agrawal.app` and `staging-api.agrawal.app` do not resolve. ADR-0026 §3–4 names `api.`. Also record which environment (staging or production) this server is.
 
 Implementation items created by ADR-0026:
 
@@ -105,7 +107,7 @@ Provider work:
 
 Required infrastructure:
 
-- RDS PostgreSQL 16 databases for staging and production. One PostgreSQL 18.3 instance in ap-south-1 was previously reachable with enforced TLS, but no local credentials remain: restore access with separated migration/runtime roles, assign it to an environment or create per-environment databases, resolve the 16-vs-18 engine question from §1, and restrict network access before it holds real data.
+- RDS PostgreSQL 18 databases for staging and production (ADR-0029). One PostgreSQL 18.3 instance in ap-south-1 was previously reachable with enforced TLS, but no local credentials remain: restore access with separated migration/runtime roles, assign it to an environment or create per-environment databases and restrict network access before it holds real data.
 - Private S3 media buckets with Block Public Access, encryption, lifecycle policy, and least-privilege API access.
 - ECR repositories for staging and production images.
 - EC2 host with Docker/Caddy and SSM Agent.

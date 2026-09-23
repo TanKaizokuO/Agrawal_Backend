@@ -65,10 +65,10 @@ When triggered via SSM, `deploy.sh <env> <IMAGE_URI>` executes:
 
 ## 4. Local Development
 
-Local development uses `docker-compose.yml` in `Agrawal_Backend`, which starts **only** PostgreSQL 16:
+Local development uses `docker-compose.yml` in `Agrawal_Backend`, which starts **only** PostgreSQL 18 (the RDS version, ADR-0029):
 
 ```bash
-# Start local PostgreSQL 16 (includes pg_trgm and citext extensions)
+# Start local PostgreSQL 18 (includes pg_trgm and citext extensions)
 docker compose up -d
 
 # Check readiness
