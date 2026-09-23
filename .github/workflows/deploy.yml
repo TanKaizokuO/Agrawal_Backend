@@ -50,8 +50,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
       - name: Build App
-        run: npm run build --if-present
+        run: npm run build
+
+      - name: Run database migrations
+        run: |
+          set -euo pipefail
+          set -a && . ./.env && set +a
+          npm run prisma:migrate
+
+      - name: Remove dev dependencies
+        run: npm prune --omit=dev
 
       - name: Sync files to app directory
         run: |
