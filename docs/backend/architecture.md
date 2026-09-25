@@ -134,12 +134,12 @@ Payments must not import Registration or Noticeboards. It announces a captured o
 
 | Variable | Example / default | Purpose |
 |---|---|---|
-| `NODE_ENV` | `production` | |
+| `NODE_ENV` | Required: `development` \| `test` \| `production` | No config default; deployment sets `production` explicitly. |
 | `APP_ENV` | `local` \| `staging` \| `production` | Distinct from NODE_ENV; selects vendor projects. |
 | `PORT` | `3000` | |
 | `DATABASE_URL` | | App role (restricted grants, see Processing Record). |
 | `DATABASE_MIGRATION_URL` | | Owner role, used only by `prisma migrate deploy`. |
-| `WEB_ORIGINS` | `https://register.example.in` | Comma-separated exact origins for CORS and CSRF. |
+| `WEB_ORIGINS` | Required; no default | Comma-separated exact origins for CORS and CSRF. |
 | `SESSION_TTL_WEB_DAYS` | `30` | Sliding. |
 | `SESSION_TTL_MOBILE_DAYS` | `90` | Sliding. |
 | `FIREBASE_PROJECT_ID` | | |
@@ -179,13 +179,15 @@ Tuning values live in config with the defaults given in module files, never as l
 { "error": { "code": "DUPLICATE_HEAD", "message": "…", "details": { } }, "requestId": "…" }
 ```
 
-`AppError(code, httpStatus, details?)` is the only thrown error type in services. The error middleware maps: `AppError` → its status; zod failure → `400 VALIDATION_FAILED` with `details.issues` (path + message per field); Prisma unique violation not already mapped → `409 CONFLICT`; anything else → `500 INTERNAL` with no internals leaked, logged at `error` with the request ID.
+`AppError(code, httpStatus, details?)` is the only thrown error type in services. The error middleware maps: `AppError` → its status; zod failure and malformed JSON (`entity.parse.failed`) → `400 VALIDATION_FAILED`; oversized JSON (`entity.too.large`) → `413 PAYLOAD_TOO_LARGE`; Prisma unique violation not already mapped → `409 CONFLICT`; anything else → `500 INTERNAL` with no internals leaked, logged at `error` with the request ID. Parser failures are client errors and are not logged as unhandled server errors.
 
-Shared codes: `VALIDATION_FAILED` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `CONFLICT` 409, `RATE_LIMITED` 429 (with `Retry-After`), `IDEMPOTENCY_KEY_REUSED` 422, `INTERNAL` 500, `UPSTREAM_UNAVAILABLE` 503. Module-specific codes are listed in each module file. Every code appears in `src/http/errors.ts` with its `{en, hi}` message.
+Shared codes: `VALIDATION_FAILED` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `CONFLICT` 409, `PAYLOAD_TOO_LARGE` 413, `RATE_LIMITED` 429 (with `Retry-After`), `IDEMPOTENCY_KEY_REUSED` 422, `INTERNAL` 500, `UPSTREAM_UNAVAILABLE` 503. Module-specific codes are listed in each module file. Every code appears in `src/http/errors.ts` with its `{en, hi}` message.
 
 ### Idempotency
 
-Every `POST` that creates a resource or moves money accepts an `Idempotency-Key` header (UUID). Mark those routes with `idempotent()` middleware. Table `IdempotencyRecord(principalKey, key, requestHash, responseStatus, responseBody, createdAt)`, unique `(principalKey, key)`, kept 24 hours. Same key + same body hash → replay the stored response. Same key + different body → `422 IDEMPOTENCY_KEY_REUSED`. The web and Flutter clients generate one key per user action and reuse it on retry.
+Every `POST` that creates a resource or moves money accepts an `Idempotency-Key` header (UUID). Mark those routes with `idempotent()` middleware. Table `IdempotencyRecord(principalKey, key, requestHash, responseStatus, responseBody, responseHeaders, createdAt)`, unique `(principalKey, key)`, keeps successful 2xx responses for 24 hours from completion. A null response status reserves the key while its operation runs: the same request gets `409 CONFLICT` while in flight, and a different request hash gets `422 IDEMPOTENCY_KEY_REUSED`. Completed 2xx responses replay their status, body and application headers. Non-2xx responses release the reservation and are not cached, so a later retry may execute again. The web and Flutter clients generate one key per user action and reuse it on retry.
+
+`IdempotencyStore` requires `find`, `claim`, `complete`, `release`, and `purge`; `PrismaIdempotencyStoreAdapter` is the sole persistent implementation. Claim, completion, release, and purge are mandatory parts of the same lifecycle contract—middleware has no optional-method or fallback-store path.
 
 ### CORS and CSRF
 
@@ -199,9 +201,9 @@ Every `POST` that creates a resource or moves money accepts an `Idempotency-Key`
 
 ## Jobs
 
-- One pg-boss instance, started in `main.ts`. At pilot scale the HTTP server and the workers run in **one process**; `WORKERS_ENABLED=false` lets a second process serve HTTP only if that is ever needed.
+- One pg-boss instance is started in every API process. `WORKERS_ENABLED=false` disables local worker and schedule registration only; pg-boss remains available for enqueueing jobs for separate workers.
 - Job names are `<module>.<verb>` (`registration.expireJoinRequest`). Each module registers its workers in its `jobs.ts` via `registerWorkers(boss, deps)`.
-- Enqueue inside the domain transaction: pg-boss's `send` accepts a `db` option executing through the caller's connection; use it with the Prisma transaction's connection (`tx.$executeRaw` wrapper) so a rolled-back transaction enqueues nothing. If wiring that proves impractical for the pinned versions, use a transactional outbox table (`OutboxJob`) written in the transaction and drained into pg-boss by a 5-second poller — pick one and use it everywhere.
+- Payment events use the transactional `PaymentOutboxJob` for dispatch and recovery. Other modules retain their existing enqueue and recovery boundaries.
 - Every worker is idempotent: it re-reads current state and exits quietly if the work is already done. Retries: `retryLimit: 5`, `retryBackoff: true`.
 - Scheduled jobs (`boss.schedule`, cron in `Asia/Kolkata`):
 

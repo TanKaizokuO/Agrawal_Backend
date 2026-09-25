@@ -77,6 +77,9 @@ export const ModelName = {
   Flag: 'Flag',
   Payment: 'Payment',
   Refund: 'Refund',
+  RefundAttempt: 'RefundAttempt',
+  PaymentOrderClaim: 'PaymentOrderClaim',
+  PaymentOutboxJob: 'PaymentOutboxJob',
   HeadAnchor: 'HeadAnchor',
   WebhookEvent: 'WebhookEvent',
   Family: 'Family',
@@ -125,6 +128,7 @@ export const IdempotencyRecordScalarFieldEnum = {
   requestHash: 'requestHash',
   responseStatus: 'responseStatus',
   responseBody: 'responseBody',
+  responseHeaders: 'responseHeaders',
   createdAt: 'createdAt'
 } as const
 
@@ -501,10 +505,46 @@ export const RefundScalarFieldEnum = {
   status: 'status',
   requestedAt: 'requestedAt',
   processedAt: 'processedAt',
+  processingStartedAt: 'processingStartedAt',
+  attemptNumber: 'attemptNumber',
   failureReason: 'failureReason'
 } as const
 
 export type RefundScalarFieldEnum = (typeof RefundScalarFieldEnum)[keyof typeof RefundScalarFieldEnum]
+
+
+export const RefundAttemptScalarFieldEnum = {
+  refundId: 'refundId',
+  attemptNumber: 'attemptNumber',
+  razorpayRefundId: 'razorpayRefundId',
+  createdAt: 'createdAt'
+} as const
+
+export type RefundAttemptScalarFieldEnum = (typeof RefundAttemptScalarFieldEnum)[keyof typeof RefundAttemptScalarFieldEnum]
+
+
+export const PaymentOrderClaimScalarFieldEnum = {
+  purpose: 'purpose',
+  subjectId: 'subjectId',
+  paymentId: 'paymentId',
+  amountPaise: 'amountPaise',
+  attemptedAt: 'attemptedAt'
+} as const
+
+export type PaymentOrderClaimScalarFieldEnum = (typeof PaymentOrderClaimScalarFieldEnum)[keyof typeof PaymentOrderClaimScalarFieldEnum]
+
+
+export const PaymentOutboxJobScalarFieldEnum = {
+  id: 'id',
+  eventKey: 'eventKey',
+  jobName: 'jobName',
+  payload: 'payload',
+  createdAt: 'createdAt',
+  claimedAt: 'claimedAt',
+  dispatchedAt: 'dispatchedAt'
+} as const
+
+export type PaymentOutboxJobScalarFieldEnum = (typeof PaymentOutboxJobScalarFieldEnum)[keyof typeof PaymentOutboxJobScalarFieldEnum]
 
 
 export const HeadAnchorScalarFieldEnum = {
@@ -700,19 +740,19 @@ export const SortOrder = {
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
-export const JsonNullValueInput = {
-  JsonNull: JsonNull
-} as const
-
-export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
-
-
 export const NullableJsonNullValueInput = {
   DbNull: DbNull,
   JsonNull: JsonNull
 } as const
 
 export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
+
+
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
 
 
 export const QueryMode = {

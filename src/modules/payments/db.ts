@@ -46,10 +46,12 @@ export interface RefundRow {
     | "OFFICER";
   readonly amountPaise: number;
   readonly razorpayRefundId: string | null;
-  readonly status: "REQUESTED" | "PROCESSED" | "FAILED";
-  /** On a failed refund this is also the last gateway-attempt time. */
+  readonly status: "REQUESTED" | "PROCESSING" | "PROCESSED" | "FAILED";
   readonly requestedAt: Date;
+  /** For FAILED, this marks the failed attempt time used by the daily retry window. */
   readonly processedAt: Date | null;
+  readonly processingStartedAt: Date | null;
+  readonly attemptNumber: number;
   readonly failureReason: string | null;
 }
 

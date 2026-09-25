@@ -2,11 +2,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { Prisma } from "../../generated/prisma/client.js";
 import type { Clock } from "../../clock.js";
-import type { PaymentGateway, PaymentProviderPayment } from "../../adapters/ports.js";
+import type { PaymentGateway, PaymentProviderPayment, PaymentRefund } from "../../adapters/ports.js";
 import type { JobRuntime } from "../../jobs.js";
 import { AppError } from "../../http/errors.js";
-import { isRecord } from "./guards.js";
-import { paymentCapturedJobName, type PaymentCapturedPayload } from "./events.js";
+import { isNotFoundViolation, isRecord, isUniqueViolation } from "./guards.js";
+import { paymentCapturedJobName } from "./events.js";
+import { PAYMENT_JOB_RETRY_OPTIONS } from "./jobs.js";
 import type {
   PaymentDatabase,
   PaymentRow,
@@ -19,24 +20,11 @@ import type {
 export interface PaymentServiceConfig {
   readonly razorpayKeyId: string;
   readonly razorpayKeySecret: string;
-  readonly razorpayWebhookSecret: string;
   readonly paymentIdentityHmacKey: string;
-}
-
-function jsonInputValue(value: unknown): Prisma.InputJsonValue | null {
-  if (value === null) return null;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  if (Array.isArray(value)) return value.map((item) => jsonInputValue(item));
-  if (isRecord(value)) {
-    const object: Record<string, Prisma.InputJsonValue | null> = {};
-    for (const [key, item] of Object.entries(value)) {
-      object[key] = jsonInputValue(item);
-    }
-    return object;
-  }
-  throw new AppError("VALIDATION_FAILED", 400);
+  readonly orderCreationClaimLeaseSeconds: number;
+  readonly refundClaimLeaseSeconds: number;
+  readonly outboxClaimLeaseSeconds: number;
+  readonly outboxJobDedupSeconds: number;
 }
 
 // ---------- Public types ----------
@@ -150,16 +138,6 @@ export function extractIdentity(
 
 // ---------- Signatures ----------
 
-export function verifyWebhookSignature(
-  rawBody: Uint8Array,
-  signatureHex: string,
-  secret: string,
-): boolean {
-  if (!/^[0-9a-f]{64}$/iu.test(signatureHex)) return false;
-  const expected = createHmac("sha256", secret).update(rawBody).digest();
-  const received = Buffer.from(signatureHex, "hex");
-  return timingSafeEqual(expected, received);
-}
 
 export function verifyCheckoutSignature(
   orderId: string,
@@ -180,7 +158,6 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-const JOB_RETRY_OPTIONS = { retryLimit: 5, retryBackoff: true } as const;
 
 // ---------- Cross-module seams ----------
 
@@ -224,6 +201,8 @@ export class PaymentService {
   private readonly processingRecord: ProcessingRecordWriter | undefined;
   private readonly restrictedStorage: RestrictedStorageMover | undefined;
   private readonly logger: PaymentLogger;
+  // Same-instance promise sharing; PaymentOrderClaim remains the durable cross-instance source.
+  private readonly inFlightOrderCreations = new Map<string, Promise<OrderForCheckout>>();
 
   constructor(deps: PaymentServiceDeps) {
     this.db = deps.db;
@@ -246,11 +225,25 @@ export class PaymentService {
       throw new AppError("VALIDATION_FAILED", 400);
     }
 
-    return this.db.$transaction(async (tx) => {
-      // A subject can have at most one active checkout at a time. The advisory
-      // lock also closes the read-then-create race when two HTTP retries arrive
-      // on different workers before either Payment row is visible.
-      const lockKey = `payment-order:${input.purpose}:${input.subjectId}`;
+    const key = `${input.purpose}:${input.subjectId}`;
+    const inFlight = this.inFlightOrderCreations.get(key);
+    if (inFlight !== undefined) return inFlight;
+
+    const creation = this.createOrderWithClaim(input);
+    this.inFlightOrderCreations.set(key, creation);
+    try {
+      return await creation;
+    } finally {
+      if (this.inFlightOrderCreations.get(key) === creation) {
+        this.inFlightOrderCreations.delete(key);
+      }
+    }
+  }
+
+  private async createOrderWithClaim(input: CreateOrderInput): Promise<OrderForCheckout> {
+    const now = this.clock.now();
+    const lockKey = `payment-order:${input.purpose}:${input.subjectId}`;
+    const reservation = await this.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const captured = await tx.payment.findFirst({
         where: {
@@ -259,9 +252,11 @@ export class PaymentService {
           status: { in: ["CAPTURED", "REFUND_PENDING"] },
         },
       });
-      if (captured !== null) return this.checkoutOrder(captured, input.payerPhoneE164, true);
+      if (captured !== null) {
+        return { payment: captured, alreadyPaid: true } as const;
+      }
 
-      const cutoff = new Date(this.clock.now().getTime() - THIRTY_MINUTES_MS);
+      const cutoff = new Date(now.getTime() - THIRTY_MINUTES_MS);
       const recent = await tx.payment.findFirst({
         where: {
           purpose: input.purpose,
@@ -271,28 +266,78 @@ export class PaymentService {
         },
         orderBy: { createdAt: "desc" },
       });
-      if (recent !== null) return this.checkoutOrder(recent, input.payerPhoneE164, false);
-
-      const paymentId = uuidv7();
-      const providerOrder = await this.gateway.createOrder({
-        amountPaise: input.amountPaise,
-        currency: "INR",
-        receipt: paymentId,
-        notes: { purpose: input.purpose, subjectId: input.subjectId },
-      });
-      if (
-        providerOrder.providerOrderId.length === 0
-        || !Number.isSafeInteger(providerOrder.amountPaise)
-        || providerOrder.amountPaise <= 0
-      ) {
-        throw new AppError("UPSTREAM_UNAVAILABLE", 503);
+      if (recent !== null) {
+        return { payment: recent, alreadyPaid: false } as const;
       }
 
-      const payment = await tx.payment.create({
+      const claimKey = { purpose: input.purpose, subjectId: input.subjectId };
+      const existingClaim = await tx.paymentOrderClaim.findUnique({
+        where: { purpose_subjectId: claimKey },
+      });
+      if (existingClaim !== null) {
+        if (now.getTime() - existingClaim.attemptedAt.getTime() < this.config.orderCreationClaimLeaseSeconds * 1000) {
+          throw new AppError("UPSTREAM_UNAVAILABLE", 503);
+        }
+        const claimed = await tx.paymentOrderClaim.updateMany({
+          where: { ...claimKey, attemptedAt: existingClaim.attemptedAt },
+          data: { attemptedAt: now },
+        });
+        if (claimed.count === 0) throw new AppError("UPSTREAM_UNAVAILABLE", 503);
+        return { claim: { ...existingClaim, attemptedAt: now }, recovering: true } as const;
+      }
+
+      const claim = await tx.paymentOrderClaim.create({
         data: {
-          id: paymentId,
           purpose: input.purpose,
           subjectId: input.subjectId,
+          paymentId: uuidv7(),
+          amountPaise: input.amountPaise,
+          attemptedAt: now,
+        },
+      });
+      return { claim, recovering: false } as const;
+    });
+    if ("payment" in reservation) {
+      return this.checkoutOrder(
+        reservation.payment,
+        input.payerPhoneE164,
+        reservation.alreadyPaid === true,
+      );
+    }
+
+    const { claim, recovering } = reservation;
+    const providerOrder = (recovering ? await this.gateway.findOrderByReceipt(claim.paymentId) : null)
+      ?? await this.gateway.createOrder({
+        amountPaise: claim.amountPaise,
+        currency: "INR",
+        receipt: claim.paymentId,
+        notes: { purpose: claim.purpose, subjectId: claim.subjectId },
+      });
+    if (
+      providerOrder.providerOrderId.length === 0
+      || !Number.isSafeInteger(providerOrder.amountPaise)
+      || providerOrder.amountPaise <= 0
+    ) {
+      throw new AppError("UPSTREAM_UNAVAILABLE", 503);
+    }
+
+    const payment = await this.db.$transaction(async (tx) => {
+      const activeClaim = await tx.paymentOrderClaim.findUnique({
+        where: { purpose_subjectId: { purpose: claim.purpose, subjectId: claim.subjectId } },
+      });
+      if (activeClaim === null) {
+        const existing = await tx.payment.findUnique({ where: { id: claim.paymentId } });
+        if (existing !== null) return existing;
+        throw new AppError("UPSTREAM_UNAVAILABLE", 503);
+      }
+      if (activeClaim.attemptedAt.getTime() !== claim.attemptedAt.getTime()) {
+        throw new AppError("UPSTREAM_UNAVAILABLE", 503);
+      }
+      const created = await tx.payment.create({
+        data: {
+          id: claim.paymentId,
+          purpose: claim.purpose,
+          subjectId: claim.subjectId,
           payerPhoneE164: input.payerPhoneE164,
           payerMemberId: input.payerMemberId ?? null,
           amountPaise: providerOrder.amountPaise,
@@ -301,8 +346,12 @@ export class PaymentService {
           razorpayOrderId: providerOrder.providerOrderId,
         },
       });
-      return this.checkoutOrder(payment, input.payerPhoneE164, false);
+      await tx.paymentOrderClaim.delete({
+        where: { purpose_subjectId: { purpose: claim.purpose, subjectId: claim.subjectId } },
+      });
+      return created;
     });
+    return this.checkoutOrder(payment, input.payerPhoneE164, false);
   }
 
   private checkoutOrder(
@@ -369,116 +418,6 @@ export class PaymentService {
     return this.getView(payment.id);
   }
 
-  // ---- Webhook ingestion ----
-
-  verifyWebhook(rawBody: Uint8Array, signatureHex: string): boolean {
-    return verifyWebhookSignature(rawBody, signatureHex, this.config.razorpayWebhookSecret);
-  }
-
-  async ingestWebhookEvent(eventId: string, eventType: string, payload: unknown): Promise<void> {
-    if (eventId.trim().length === 0 || eventType.trim().length === 0) {
-      throw new AppError("VALIDATION_FAILED", 400);
-    }
-    const payloadValue = jsonInputValue(payload);
-
-    let shouldEnqueue = false;
-    try {
-      await this.db.$transaction(async (tx) => {
-        const existing = await tx.webhookEvent.findUnique({ where: { eventId } });
-        if (existing !== null) {
-          shouldEnqueue = existing.processedAt === null;
-          return;
-        }
-        await tx.webhookEvent.create({
-          data: {
-            eventId,
-            event: eventType,
-            payload: payloadValue === null ? Prisma.JsonNull : payloadValue,
-          },
-        });
-        shouldEnqueue = true;
-      });
-    } catch (error: unknown) {
-      if (!isUniqueViolation(error)) throw error;
-      const existing = await this.db.webhookEvent.findUnique({ where: { eventId } });
-      shouldEnqueue = existing?.processedAt === null;
-    }
-
-    if (shouldEnqueue) {
-      await this.jobs.send("payments.applyWebhook", { eventId }, JOB_RETRY_OPTIONS);
-    }
-  }
-
-  async applyWebhook(eventId: string): Promise<void> {
-    const event = await this.db.webhookEvent.findUnique({ where: { eventId } });
-    if (event === null || event.processedAt !== null) return;
-
-    const payload = isRecord(event.payload) ? event.payload : null;
-    const nestedPayload = isRecord(payload?.payload) ? payload.payload : null;
-    const eventPayload = nestedPayload ?? payload ?? {};
-
-    switch (event.event) {
-      case "payment.captured": {
-        const payment = extractPaymentFromWebhook(eventPayload);
-        if (payment !== null) await this.applyCapture(payment);
-        break;
-      }
-      case "order.paid":
-        await this.applyOrderPaid(eventPayload);
-        break;
-      case "payment.failed": {
-        const payment = extractPaymentFromWebhook(eventPayload);
-        if (payment !== null) await this.applyFailure(payment);
-        break;
-      }
-      case "refund.processed": {
-        const refund = extractRefundFromWebhook(eventPayload);
-        if (refund !== null) await this.applyRefundProcessed(refund);
-        break;
-      }
-      case "refund.failed": {
-        const refund = extractRefundFromWebhook(eventPayload);
-        if (refund !== null) await this.applyRefundFailed(refund);
-        break;
-      }
-      default:
-        break;
-    }
-
-    await this.db.webhookEvent.update({
-      where: { eventId },
-      data: { processedAt: this.clock.now() },
-    });
-  }
-
-  private async applyOrderPaid(eventPayload: Record<string, unknown>): Promise<void> {
-    const orderWrapper = isRecord(eventPayload.order) ? eventPayload.order : null;
-    const order = isRecord(orderWrapper?.entity) ? orderWrapper.entity : orderWrapper;
-    const orderId = readString(order?.id);
-    if (orderId === null) return;
-
-    const paymentEntity = extractPaymentFromWebhook(eventPayload);
-    if (paymentEntity !== null) {
-      const provider = withOrderId(paymentEntity, orderId);
-      if (provider !== null) await this.applyCapture(provider);
-      return;
-    }
-
-    const providerPaymentId = readString(order?.payment_id);
-    if (providerPaymentId !== null) {
-      const provider = withOrderId(await this.gateway.fetchPayment(providerPaymentId), orderId);
-      if (provider !== null) await this.applyCapture(provider);
-      return;
-    }
-
-    const orderPayments = await this.gateway.fetchOrderPayments(orderId);
-    const captured = orderPayments.find((candidate) => candidate.status === "captured");
-    if (captured !== undefined) {
-      const provider = withOrderId(captured, orderId);
-      if (provider !== null) await this.applyCapture(provider);
-    }
-  }
-
   // ---- Provider state application ----
 
   private async applyProviderPayment(
@@ -499,59 +438,73 @@ export class PaymentService {
     }
   }
 
-  private async applyCapture(provider: PaymentProviderPayment): Promise<void> {
-    if (provider.orderId === null || provider.id.length === 0) return;
+  // Provider-state effects shared with PaymentWebhookService and reconciliation.
+  async applyCapture(provider: PaymentProviderPayment): Promise<void> {
+    const orderId = provider.orderId;
+    if (orderId === null || provider.id.length === 0) return;
 
-    const payment = await this.db.payment.findUnique({
-      where: { razorpayOrderId: provider.orderId },
+    const eventKey = await this.db.$transaction(async (tx): Promise<string | null> => {
+      const payment = await tx.payment.findUnique({ where: { razorpayOrderId: orderId } });
+      if (payment === null) return null;
+      if (
+        provider.amountPaise !== null &&
+        provider.amountPaise !== payment.amountPaise
+      ) {
+        this.logger.warn(
+          { paymentId: payment.id, providerPaymentId: provider.id },
+          "PAYMENT_AMOUNT_MISMATCH",
+        );
+        return null;
+      }
+      if (
+        payment.razorpayPaymentId !== null &&
+        payment.razorpayPaymentId !== provider.id
+      ) {
+        return null;
+      }
+
+      switch (payment.status) {
+        case "CREATED":
+        case "FAILED": {
+          const identity = extractIdentity(provider, this.config.paymentIdentityHmacKey);
+          const changed = await tx.payment.updateMany({
+            where: { id: payment.id, status: { in: ["CREATED", "FAILED"] } },
+            data: {
+              status: "CAPTURED",
+              razorpayPaymentId: provider.id,
+              method: provider.method,
+              identityKind: identity.kind,
+              identityHash: identity.hash,
+              identityMasked: identity.masked,
+              capturedAt: this.clock.now(),
+              failedAt: null,
+              failureReason: null,
+            },
+          });
+          if (changed.count === 0) return null;
+          break;
+        }
+        case "CAPTURED":
+        case "REFUND_PENDING":
+        case "REFUNDED":
+          break;
+        default:
+          return null;
+      }
+
+      if (payment.consumedAt !== null) return null;
+      const capturedEventKey = `payments.captured:${payment.id}`;
+      await this.recordOutboxJob(tx, {
+        eventKey: capturedEventKey,
+        jobName: paymentCapturedJobName(payment.purpose),
+        payload: { paymentId: payment.id, subjectId: payment.subjectId },
+      });
+      return capturedEventKey;
     });
-    if (payment === null) return;
-    if (
-      provider.amountPaise !== null &&
-      provider.amountPaise !== payment.amountPaise
-    ) {
-      this.logger.warn(
-        { paymentId: payment.id, providerPaymentId: provider.id },
-        "PAYMENT_AMOUNT_MISMATCH",
-      );
-      return;
-    }
-    if (
-      payment.razorpayPaymentId !== null &&
-      payment.razorpayPaymentId !== provider.id
-    ) {
-      return;
-    }
-
-    const identity = extractIdentity(provider, this.config.paymentIdentityHmacKey);
-    const changed = await this.db.payment.updateMany({
-      where: {
-        id: payment.id,
-        status: { in: ["CREATED", "FAILED"] },
-      },
-      data: {
-        status: "CAPTURED",
-        razorpayPaymentId: provider.id,
-        method: provider.method,
-        identityKind: identity.kind,
-        identityHash: identity.hash,
-        identityMasked: identity.masked,
-        capturedAt: this.clock.now(),
-        failedAt: null,
-        failureReason: null,
-      },
-    });
-    if (changed.count === 0) return;
-
-    const captured: PaymentCapturedPayload = { paymentId: payment.id, subjectId: payment.subjectId };
-    await this.jobs.send(
-      paymentCapturedJobName(payment.purpose),
-      captured,
-      JOB_RETRY_OPTIONS,
-    );
+    if (eventKey !== null) await this.dispatchOutboxJob(eventKey);
   }
 
-  private async applyFailure(provider: PaymentProviderPayment): Promise<void> {
+  async applyFailure(provider: PaymentProviderPayment): Promise<void> {
     if (provider.orderId === null || provider.id.length === 0) return;
     const payment = await this.db.payment.findUnique({
       where: { razorpayOrderId: provider.orderId },
@@ -568,70 +521,191 @@ export class PaymentService {
     });
   }
 
-  private async applyRefundProcessed(refundEntity: WebhookRefundEntity): Promise<void> {
-    let refund = await this.db.refund.findFirst({
-      where: { razorpayRefundId: refundEntity.id },
-    });
-    if (refund === null && refundEntity.paymentId !== "") {
-      refund = await this.db.refund.findUnique({
-        where: { paymentId: refundEntity.paymentId },
+  async applyProviderRefundStatus(
+    refundId: string,
+    attemptNumber: number,
+    providerRefundId: string,
+    providerStatus: string,
+    expectedClaimAt?: Date,
+    failureReason?: string | null,
+  ): Promise<void> {
+    const result = await this.db.$transaction(async (tx) => {
+      const refund = await tx.refund.findUnique({ where: { id: refundId } });
+      if (refund === null || refund.attemptNumber !== attemptNumber) return null;
+      if (
+        expectedClaimAt !== undefined &&
+        (
+          refund.status !== "PROCESSING" ||
+          refund.processingStartedAt?.getTime() !== expectedClaimAt.getTime()
+        )
+      ) {
+        return null;
+      }
+      if (refund.status === "PROCESSED") return null;
+
+      const attempt = await tx.refundAttempt.findUnique({
+        where: { refundId_attemptNumber: { refundId, attemptNumber } },
       });
+      if (attempt === null) return null;
+      if (
+        attempt.razorpayRefundId !== null &&
+        attempt.razorpayRefundId !== providerRefundId
+      ) {
+        return null;
+      }
+      if (attempt.razorpayRefundId === null) {
+        const assigned = await tx.refundAttempt.updateMany({
+          where: { refundId, attemptNumber, razorpayRefundId: null },
+          data: { razorpayRefundId: providerRefundId },
+        });
+        if (assigned.count === 0) {
+          const currentAttempt = await tx.refundAttempt.findUnique({
+            where: { refundId_attemptNumber: { refundId, attemptNumber } },
+          });
+          if (currentAttempt?.razorpayRefundId !== providerRefundId) return null;
+        }
+      }
+
+      const payment = await tx.payment.findUnique({ where: { id: refund.paymentId } });
+      if (payment === null) return null;
+
+      if (providerStatus === "processed") {
+        const changed = await tx.refund.updateMany({
+          where: {
+            id: refund.id,
+            attemptNumber,
+            status: { not: "PROCESSED" },
+            ...(expectedClaimAt === undefined ? {} : { processingStartedAt: expectedClaimAt }),
+          },
+          data: {
+            status: "PROCESSED",
+            processedAt: this.clock.now(),
+            processingStartedAt: null,
+            failureReason: null,
+            razorpayRefundId: providerRefundId,
+          },
+        });
+        if (changed.count === 0) return null;
+        await tx.payment.updateMany({
+          where: { id: payment.id, status: { not: "REFUNDED" } },
+          data: { status: "REFUNDED" },
+        });
+        const eventKey = `payments.refunded:${payment.id}`;
+        await this.recordOutboxJob(tx, {
+          eventKey,
+          jobName: `payments.refunded.${payment.purpose}`,
+          payload: { paymentId: payment.id, subjectId: payment.subjectId },
+        });
+        return { eventKey, paymentId: payment.id, shouldLogFailure: false };
+      }
+
+      const changed = await tx.refund.updateMany({
+        where: {
+          id: refund.id,
+          attemptNumber,
+          status: { not: "PROCESSED" },
+          ...(expectedClaimAt === undefined ? {} : { processingStartedAt: expectedClaimAt }),
+        },
+        data: {
+          status: providerStatus === "failed" ? "FAILED" : "REQUESTED",
+          requestedAt: this.clock.now(),
+          processingStartedAt: null,
+          failureReason: providerStatus === "failed" ? failureReason ?? "refund_failed" : null,
+          razorpayRefundId: providerRefundId,
+        },
+      });
+      return changed.count === 0
+        ? null
+        : {
+            eventKey: null,
+            paymentId: payment.id,
+            shouldLogFailure: providerStatus === "failed",
+          };
+    });
+    if (result === null) return;
+    if (result.shouldLogFailure) {
+      this.logger.error(
+        { refundId, attemptNumber, paymentId: result.paymentId },
+        "REFUND_FAILED",
+      );
     }
-    if (refund === null) return;
-
-    const changed = await this.db.refund.updateMany({
-      where: { id: refund.id, status: { in: ["REQUESTED", "FAILED"] } },
-      data: {
-        status: "PROCESSED",
-        processedAt: this.clock.now(),
-        failureReason: null,
-        razorpayRefundId: refund.razorpayRefundId ?? refundEntity.id,
-      },
-    });
-    if (changed.count === 0) return;
-
-    const payment = await this.db.payment.findUnique({ where: { id: refund.paymentId } });
-    if (payment === null) return;
-    const paymentChanged = await this.db.payment.updateMany({
-      where: { id: payment.id, status: { not: "REFUNDED" } },
-      data: { status: "REFUNDED" },
-    });
-    if (paymentChanged.count === 0) return;
-
-    await this.jobs.send(
-      `payments.refunded.${payment.purpose}`,
-      { paymentId: payment.id, subjectId: payment.subjectId },
-      JOB_RETRY_OPTIONS,
-    );
+    if (result.eventKey !== null) await this.dispatchOutboxJob(result.eventKey);
   }
 
-  private async applyRefundFailed(refundEntity: WebhookRefundEntity): Promise<void> {
-    let refund = await this.db.refund.findFirst({
-      where: { razorpayRefundId: refundEntity.id },
-    });
-    if (refund === null && refundEntity.paymentId !== "") {
-      refund = await this.db.refund.findUnique({
-        where: { paymentId: refundEntity.paymentId },
-      });
-    }
-    if (refund === null || refund.status === "PROCESSED") return;
-
-    await this.db.refund.update({
-      where: { id: refund.id },
-      data: {
-        status: "FAILED",
-        requestedAt: this.clock.now(),
-        failureReason: refundEntity.errorDescription ?? "refund_failed",
-        razorpayRefundId: refund.razorpayRefundId ?? refundEntity.id,
+  private async recordOutboxJob(
+    tx: PaymentTxClient | PaymentDatabase,
+    input: {
+      readonly eventKey: string;
+      readonly jobName: string;
+      readonly payload: Prisma.InputJsonValue;
+    },
+  ): Promise<void> {
+    await tx.paymentOutboxJob.upsert({
+      where: { eventKey: input.eventKey },
+      create: {
+        id: uuidv7(),
+        eventKey: input.eventKey,
+        jobName: input.jobName,
+        payload: input.payload,
       },
+      update: {},
     });
-    this.logger.error(
-      { refundId: refund.id, paymentId: refund.paymentId },
-      "REFUND_FAILED",
-    );
+  }
+  private async recordRefundExecutionOutbox(
+    tx: PaymentTxClient,
+    refundId: string,
+    attemptNumber: number,
+  ): Promise<void> {
+    const eventKey = `payments.executeRefund:${refundId}:${attemptNumber.toString()}`;
+    await this.recordOutboxJob(tx, {
+      eventKey,
+      jobName: "payments.executeRefund",
+      payload: { refundId },
+    });
+    await tx.paymentOutboxJob.updateMany({
+      where: { eventKey, dispatchedAt: { not: null } },
+      data: { claimedAt: null, dispatchedAt: null },
+    });
   }
 
-  // ---- Refunds ----
+  private async dispatchOutboxJob(eventKey: string): Promise<void> {
+    const now = this.clock.now();
+    const claimed = await this.db.$transaction(async (tx) => {
+      const event = await tx.paymentOutboxJob.findUnique({ where: { eventKey } });
+      if (event === null || event.dispatchedAt !== null) return null;
+      if (
+        event.claimedAt !== null &&
+        now.getTime() - event.claimedAt.getTime() < this.config.outboxClaimLeaseSeconds * 1000
+      ) {
+        return null;
+      }
+      const update = await tx.paymentOutboxJob.updateMany({
+        where: { id: event.id, dispatchedAt: null, claimedAt: event.claimedAt },
+        data: { claimedAt: now },
+      });
+      return update.count === 0 ? null : event;
+    });
+    if (claimed === null) return;
+
+    try {
+      await this.jobs.send(claimed.jobName, claimed.payload, {
+        ...PAYMENT_JOB_RETRY_OPTIONS,
+        singletonKey: claimed.eventKey,
+        singletonSeconds: this.config.outboxJobDedupSeconds,
+      });
+      await this.db.paymentOutboxJob.updateMany({
+        where: { id: claimed.id, claimedAt: now, dispatchedAt: null },
+        data: { claimedAt: null, dispatchedAt: this.clock.now() },
+      });
+    } catch (error: unknown) {
+      await this.db.paymentOutboxJob.updateMany({
+        where: { id: claimed.id, claimedAt: now, dispatchedAt: null },
+        data: { claimedAt: null },
+      });
+      throw error;
+    }
+  }
+
 
   async refund(
     tx: PaymentTxClient,
@@ -674,55 +748,124 @@ export class PaymentService {
       });
     }
 
-    await this.jobs.send("payments.executeRefund", { refundId }, JOB_RETRY_OPTIONS);
+    await this.recordRefundExecutionOutbox(tx, refundId, 0);
   }
 
   async executeRefund(refundId: string): Promise<void> {
-    let gatewayFailure: { readonly error: unknown } | undefined;
-
-    await this.db.$transaction(async (tx) => {
+    const now = this.clock.now();
+    const claimed = await this.db.$transaction(async (tx) => {
       const lockKey = `payment-refund:${refundId}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const refund = await tx.refund.findUnique({ where: { id: refundId } });
       if (
         refund === null ||
-        refund.status === "PROCESSED" ||
-        (refund.razorpayRefundId !== null && refund.status !== "FAILED")
+        (refund.status !== "REQUESTED" &&
+          refund.status !== "PROCESSING" &&
+          refund.status !== "FAILED") ||
+        refund.razorpayRefundId !== null ||
+        (
+          refund.status === "FAILED" &&
+          now.getTime() - refund.requestedAt.getTime() < ONE_DAY_MS
+        ) ||
+        (
+          refund.processingStartedAt !== null &&
+          now.getTime() - refund.processingStartedAt.getTime() <
+            this.config.refundClaimLeaseSeconds * 1000
+        )
       ) {
-        return;
+        return null;
       }
-      const payment = await tx.payment.findUnique({ where: { id: refund.paymentId } });
-      if (payment === null || payment.razorpayPaymentId === null) return;
 
-      try {
-        const result = await this.gateway.refund({
-          providerPaymentId: payment.razorpayPaymentId,
-          amountPaise: refund.amountPaise,
-          speed: "normal",
-          notes: { reason: refund.reason },
-        });
-        await tx.refund.update({
-          where: { id: refund.id },
-          data: { razorpayRefundId: result.providerRefundId, requestedAt: this.clock.now() },
-        });
-      } catch (error: unknown) {
-        gatewayFailure = { error };
-        await tx.refund.update({
-          where: { id: refund.id },
+      const claim = await tx.refund.updateMany({
+        where: {
+          id: refund.id,
+          status: refund.status,
+          razorpayRefundId: null,
+          requestedAt: refund.requestedAt,
+          processingStartedAt: refund.processingStartedAt,
+          attemptNumber: refund.attemptNumber,
+        },
+        data: {
+          status: "PROCESSING",
+          processingStartedAt: now,
+          failureReason: null,
+        },
+      });
+      if (claim.count === 0) return null;
+
+      const payment = await tx.payment.findUnique({ where: { id: refund.paymentId } });
+      if (payment === null || payment.razorpayPaymentId === null) {
+        await tx.refund.updateMany({
+          where: { id: refund.id, status: "PROCESSING", processingStartedAt: now },
           data: {
-            status: "FAILED",
-            requestedAt: this.clock.now(),
-            failureReason: error instanceof Error ? error.message : "refund_failed",
+            status: refund.status === "FAILED" ? "FAILED" : "REQUESTED",
+            processingStartedAt: null,
+            failureReason: refund.failureReason,
           },
         });
+        return null;
       }
+
+      await tx.refundAttempt.upsert({
+        where: {
+          refundId_attemptNumber: {
+            refundId: refund.id,
+            attemptNumber: refund.attemptNumber,
+          },
+        },
+        create: { refundId: refund.id, attemptNumber: refund.attemptNumber },
+        update: {},
+      });
+
+      return {
+        refundId: refund.id,
+        paymentId: payment.id,
+        providerPaymentId: payment.razorpayPaymentId,
+        amountPaise: refund.amountPaise,
+        reason: refund.reason,
+        attemptNumber: refund.attemptNumber,
+        startedAt: now,
+      };
     });
+    if (claimed === null) return;
 
-    if (gatewayFailure !== undefined) {
-      throw gatewayFailure.error instanceof Error ? gatewayFailure.error : new Error("refund_failed");
+    let result: PaymentRefund;
+    try {
+      result = await this.gateway.refund({
+        providerPaymentId: claimed.providerPaymentId,
+        amountPaise: claimed.amountPaise,
+        speed: "normal",
+        notes: { reason: claimed.reason },
+        idempotencyKey: claimed.attemptNumber === 0
+          ? claimed.refundId
+          : `${claimed.refundId}-${claimed.attemptNumber.toString()}`,
+      });
+    } catch (error: unknown) {
+      await this.db.refund.updateMany({
+        where: {
+          id: claimed.refundId,
+          attemptNumber: claimed.attemptNumber,
+          status: "PROCESSING",
+          razorpayRefundId: null,
+          processingStartedAt: claimed.startedAt,
+        },
+        data: {
+          status: "FAILED",
+          requestedAt: this.clock.now(),
+          processingStartedAt: null,
+          failureReason: error instanceof Error ? error.message : "refund_failed",
+        },
+      });
+      throw error instanceof Error ? error : new Error("refund_failed");
     }
+    await this.applyProviderRefundStatus(
+      claimed.refundId,
+      claimed.attemptNumber,
+      result.providerRefundId,
+      result.status,
+      claimed.startedAt,
+    );
   }
-
   // ---- Queries and authorization ----
 
   async getForSubject(subjectId: string): Promise<PaymentView | null> {
@@ -833,7 +976,15 @@ export class PaymentService {
   async reconcile(): Promise<void> {
     const now = this.clock.now();
     const fiveMinAgo = new Date(now.getTime() - FIVE_MINUTES_MS);
+    const oneHourAgo = new Date(now.getTime() - ONE_HOUR_MS);
+    const oneDayAgo = new Date(now.getTime() - ONE_DAY_MS);
     const fortyEightHoursAgo = new Date(now.getTime() - FORTY_EIGHT_HOURS_MS);
+    const expiredRefundLeaseAt = new Date(
+      now.getTime() - this.config.refundClaimLeaseSeconds * 1000,
+    );
+    const expiredOutboxLeaseAt = new Date(
+      now.getTime() - this.config.outboxClaimLeaseSeconds * 1000,
+    );
 
     const staleCreated = await this.db.payment.findMany({
       where: {
@@ -842,32 +993,39 @@ export class PaymentService {
       },
     });
     for (const payment of staleCreated) {
-      const orderPayments = await this.gateway.fetchOrderPayments(payment.razorpayOrderId);
-      const captured = orderPayments.find((candidate) => candidate.status === "captured");
-      if (captured !== undefined) {
-        this.logger.error(
-          { paymentId: payment.id, razorpayPaymentId: captured.id },
-          "WEBHOOK_MISSED",
-        );
-        const provider = withOrderId(captured, payment.razorpayOrderId);
-        if (provider !== null) await this.applyCapture(provider);
-        continue;
-      }
-
-      const authorized = orderPayments.find((candidate) => candidate.status === "authorized");
-      if (authorized !== undefined) {
-        this.logger.error(
-          { paymentId: payment.id, razorpayPaymentId: authorized.id },
-          "WEBHOOK_MISSED",
-        );
-        const capturedPayment = await this.gateway.capture({
-          providerPaymentId: authorized.id,
-          amountPaise: payment.amountPaise,
-        });
-        const provider = withOrderId(capturedPayment, payment.razorpayOrderId);
-        if (provider !== null && provider.status === "captured") {
-          await this.applyCapture(provider);
+      try {
+        const orderPayments = await this.gateway.fetchOrderPayments(payment.razorpayOrderId);
+        const captured = orderPayments.find((candidate) => candidate.status === "captured");
+        if (captured !== undefined) {
+          this.logger.error(
+            { paymentId: payment.id, razorpayPaymentId: captured.id },
+            "WEBHOOK_MISSED",
+          );
+          const provider = withOrderId(captured, payment.razorpayOrderId);
+          if (provider !== null) await this.applyCapture(provider);
+          continue;
         }
+
+        const authorized = orderPayments.find((candidate) => candidate.status === "authorized");
+        if (authorized !== undefined) {
+          this.logger.error(
+            { paymentId: payment.id, razorpayPaymentId: authorized.id },
+            "WEBHOOK_MISSED",
+          );
+          const capturedPayment = await this.gateway.capture({
+            providerPaymentId: authorized.id,
+            amountPaise: payment.amountPaise,
+          });
+          const provider = withOrderId(capturedPayment, payment.razorpayOrderId);
+          if (provider !== null && provider.status === "captured") {
+            await this.applyCapture(provider);
+          }
+        }
+      } catch (error: unknown) {
+        this.logger.error(
+          { paymentId: payment.id, err: error },
+          "PAYMENT_RECONCILE_FAILED",
+        );
       }
     }
 
@@ -875,103 +1033,213 @@ export class PaymentService {
       where: { status: "CREATED", createdAt: { lt: fortyEightHoursAgo } },
     });
     for (const payment of abandoned) {
-      await this.db.payment.updateMany({
-        where: { id: payment.id, status: "CREATED" },
-        data: {
-          status: "FAILED",
-          failedAt: now,
-          failureReason: "ORDER_ABANDONED",
-        },
-      });
+      try {
+        await this.db.payment.updateMany({
+          where: { id: payment.id, status: "CREATED" },
+          data: {
+            status: "FAILED",
+            failedAt: now,
+            failureReason: "ORDER_ABANDONED",
+          },
+        });
+      } catch (error: unknown) {
+        this.logger.error(
+          { paymentId: payment.id, err: error },
+          "PAYMENT_RECONCILE_FAILED",
+        );
+      }
     }
 
-    const oneHourAgo = new Date(now.getTime() - ONE_HOUR_MS);
+    const unconsumedCaptures = await this.db.payment.findMany({
+      where: {
+        status: { in: ["CAPTURED", "REFUND_PENDING", "REFUNDED"] },
+        consumedAt: null,
+      },
+    });
+    for (const payment of unconsumedCaptures) {
+      const eventKey = `payments.captured:${payment.id}`;
+      try {
+        await this.recordOutboxJob(this.db, {
+          eventKey,
+          jobName: paymentCapturedJobName(payment.purpose),
+          payload: { paymentId: payment.id, subjectId: payment.subjectId },
+        });
+        await this.db.paymentOutboxJob.updateMany({
+          where: {
+            eventKey,
+            dispatchedAt: { lte: oneHourAgo },
+          },
+          data: { claimedAt: null, dispatchedAt: null },
+        });
+        await this.dispatchOutboxJob(eventKey);
+      } catch (error: unknown) {
+        this.logger.error(
+          { paymentId: payment.id, eventKey, err: error },
+          "PAYMENT_RECONCILE_FAILED",
+        );
+      }
+    }
+
     const staleRefunds = await this.db.refund.findMany({
       where: {
         OR: [
-          { status: "REQUESTED", razorpayRefundId: null, requestedAt: { lt: oneHourAgo } },
-          { status: "FAILED" },
+          {
+            status: "REQUESTED",
+            requestedAt: { lt: oneHourAgo },
+            processingStartedAt: null,
+          },
+          {
+            status: { in: ["REQUESTED", "PROCESSING"] },
+            processingStartedAt: { lte: expiredRefundLeaseAt },
+          },
+          {
+            status: "FAILED",
+            requestedAt: { lt: oneDayAgo },
+          },
         ],
       },
     });
     for (const refund of staleRefunds) {
-      const age = now.getTime() - refund.requestedAt.getTime();
-      if (refund.status === "FAILED" && age < ONE_DAY_MS) continue;
+      try {
+        if (
+          refund.processingStartedAt !== null &&
+          now.getTime() - refund.processingStartedAt.getTime() <
+            this.config.refundClaimLeaseSeconds * 1000
+        ) {
+          continue;
+        }
+        const age = now.getTime() - refund.requestedAt.getTime();
+        if (refund.status === "FAILED" && age < ONE_DAY_MS) continue;
 
-      const claimed = await this.db.refund.updateMany({
-        where:
-          refund.status === "FAILED"
-            ? { id: refund.id, status: "FAILED", requestedAt: refund.requestedAt }
-            : {
-                id: refund.id,
-                status: "REQUESTED",
-                razorpayRefundId: null,
-                requestedAt: refund.requestedAt,
-              },
-        data: { requestedAt: now },
-      });
-      if (claimed.count === 0) continue;
-      await this.jobs.send("payments.executeRefund", { refundId: refund.id }, JOB_RETRY_OPTIONS);
+        if (refund.razorpayRefundId !== null) {
+          const providerRefund = await this.gateway.fetchRefund(refund.razorpayRefundId);
+          if (
+            refund.status === "FAILED" &&
+            providerRefund.status === "failed" &&
+            age >= ONE_DAY_MS
+          ) {
+            await this.db.$transaction(async (tx) => {
+              const retry = await tx.refund.updateMany({
+                where: {
+                  id: refund.id,
+                  status: "FAILED",
+                  attemptNumber: refund.attemptNumber,
+                  razorpayRefundId: refund.razorpayRefundId,
+                  requestedAt: refund.requestedAt,
+                  processingStartedAt: null,
+                },
+                data: {
+                  status: "REQUESTED",
+                  razorpayRefundId: null,
+                  requestedAt: now,
+                  processingStartedAt: null,
+                  attemptNumber: { increment: 1 },
+                  failureReason: null,
+                },
+              });
+              if (retry.count > 0) {
+                await this.recordRefundExecutionOutbox(
+                  tx,
+                  refund.id,
+                  refund.attemptNumber + 1,
+                );
+              }
+            });
+            continue;
+          }
+          await this.applyProviderRefundStatus(
+            refund.id,
+            refund.attemptNumber,
+            providerRefund.providerRefundId,
+            providerRefund.status,
+          );
+          continue;
+        }
+
+        await this.db.$transaction((tx) =>
+          this.recordRefundExecutionOutbox(tx, refund.id, refund.attemptNumber),
+        );
+      } catch (error: unknown) {
+        this.logger.error(
+          { refundId: refund.id, paymentId: refund.paymentId, err: error },
+          "REFUND_RECONCILE_FAILED",
+        );
+      }
+    }
+
+    const processedRefundsWithoutEvents = await this.db.$queryRaw<Array<{
+      refundId: string;
+      paymentId: string;
+      purpose: PaymentPurpose;
+      subjectId: string;
+    }>>`
+      SELECT r.id AS "refundId", p.id AS "paymentId", p.purpose::text AS purpose, p.subject_id AS "subjectId"
+      FROM "refund" r
+      JOIN "payment" p ON p.id = r.payment_id
+      WHERE r.status = 'PROCESSED'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "payment_outbox_job" o
+          WHERE o.event_key = 'payments.refunded:' || p.id
+        )
+    `;
+    for (const payment of processedRefundsWithoutEvents) {
+      try {
+        await this.recordOutboxJob(this.db, {
+          eventKey: `payments.refunded:${payment.paymentId}`,
+          jobName: `payments.refunded.${payment.purpose}`,
+          payload: { paymentId: payment.paymentId, subjectId: payment.subjectId },
+        });
+      } catch (error: unknown) {
+        this.logger.error(
+          {
+            paymentId: payment.paymentId,
+            refundId: payment.refundId,
+            eventKey: `payments.refunded:${payment.paymentId}`,
+            err: error,
+          },
+          "PAYMENT_OUTBOX_RECOVERY_FAILED",
+        );
+      }
+    }
+
+    const pendingOutbox = await this.db.paymentOutboxJob.findMany({
+      where: {
+        dispatchedAt: null,
+        OR: [
+          { claimedAt: null },
+          { claimedAt: { lte: expiredOutboxLeaseAt } },
+        ],
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    for (const event of pendingOutbox) {
+      try {
+        await this.dispatchOutboxJob(event.eventKey);
+      } catch (error: unknown) {
+        const payload = isRecord(event.payload) ? event.payload : {};
+        this.logger.error(
+          {
+            eventKey: event.eventKey,
+            jobName: event.jobName,
+            paymentId: readString(payload.paymentId),
+            refundId: readString(payload.refundId),
+            eventId: readString(payload.eventId),
+            err: error,
+          },
+          "PAYMENT_OUTBOX_DISPATCH_FAILED",
+        );
+      }
     }
   }
 }
 
-// ---------- Webhook payload helpers ----------
-
-interface WebhookRefundEntity {
-  readonly id: string;
-  readonly paymentId: string;
-  readonly errorDescription: string | null;
-}
-
+// ---------- Provider response helpers ----------
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function readNumber(value: unknown): number | null {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  const numberValue = typeof value === "number" ? value : Number(value);
-  return Number.isSafeInteger(numberValue) && numberValue >= 0 ? numberValue : null;
-}
-
-function extractPaymentFromWebhook(
-  eventPayload: Record<string, unknown>,
-): PaymentProviderPayment | null {
-  const paymentWrapper = isRecord(eventPayload.payment) ? eventPayload.payment : null;
-  const entity = isRecord(paymentWrapper?.entity) ? paymentWrapper.entity : paymentWrapper;
-  if (entity === null) return null;
-  const id = readString(entity.id);
-  if (id === null) return null;
-  const status = readString(entity.status) ?? "unknown";
-  const card = isRecord(entity.card) ? entity.card : null;
-  return {
-    id,
-    orderId: readString(entity.order_id),
-    status,
-    amountPaise: readNumber(entity.amount),
-    method: readString(entity.method),
-    vpa: readString(entity.vpa),
-    cardId: readString(entity.card_id),
-    cardLast4: readString(card?.last4),
-    errorDescription: readString(entity.error_description),
-  };
-}
-
-function extractRefundFromWebhook(
-  eventPayload: Record<string, unknown>,
-): WebhookRefundEntity | null {
-  const refundWrapper = isRecord(eventPayload.refund) ? eventPayload.refund : null;
-  const entity = isRecord(refundWrapper?.entity) ? refundWrapper.entity : refundWrapper;
-  if (entity === null) return null;
-  const id = readString(entity.id);
-  if (id === null) return null;
-  return {
-    id,
-    paymentId: readString(entity.payment_id) ?? "",
-    errorDescription: readString(entity.error_description),
-  };
-}
 
 function withOrderId(
   provider: PaymentProviderPayment,
@@ -980,20 +1248,4 @@ function withOrderId(
   if (provider.orderId !== null && provider.orderId !== orderId) return null;
   if (provider.orderId === orderId) return provider;
   return { ...provider, orderId };
-}
-
-function errorCode(error: unknown): unknown {
-  if (typeof error !== "object" || error === null) return undefined;
-  if (!("code" in error)) return undefined;
-  return error.code;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === "P2002" || code === "23505";
-}
-
-function isNotFoundViolation(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === "P2025" || code === "02000";
 }

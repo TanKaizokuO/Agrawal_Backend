@@ -13,6 +13,7 @@ import type {
 import type {
   BusinessCheckoutOrder,
   NoticeAuthorProjection,
+  NoticePushMessage,
   NoticesBusinessPort,
   NoticesClock,
   NoticesConfig,
@@ -158,14 +159,23 @@ export class NoticesService {
     }
   }
 
-  private async checkPostingCap(memberId: string): Promise<void> {
-    const todayIst = this.clock.todayIst();
-    // Blood SOS is exempt (it lives in a different module and table).
-    // Notices across all boards authored by this member on today's IST calendar day.
-    const notices = await this.db.notice.findMany({
-      where: { authorMemberId: memberId },
+  private async checkPostingCap(
+    tx: NoticesTxClient,
+    memberId: string,
+    todayIst: string,
+  ): Promise<void> {
+    if (!(await tx.lockMemberForNotice(memberId))) {
+      throw new AppError("UNAUTHENTICATED", 401);
+    }
+
+    const startOfIstDay = new Date(`${todayIst}T00:00:00.000+05:30`);
+    const startOfNextIstDay = new Date(startOfIstDay.getTime() + DAY_MS);
+    const todayCount = await tx.notice.count({
+      where: {
+        authorMemberId: memberId,
+        createdAt: { gte: startOfIstDay, lt: startOfNextIstDay },
+      },
     });
-    const todayCount = notices.filter((n) => dateToIstDate(n.createdAt) === todayIst).length;
     if (todayCount >= this.config.postingCapPerDay) {
       throw new AppError("POSTING_CAP_REACHED", 429);
     }
@@ -197,7 +207,6 @@ export class NoticesService {
     input: ShokSandeshInput,
   ): Promise<{ readonly notice: NoticeView }> {
     await this.checkSuspension(authorPrincipal.memberId);
-    await this.checkPostingCap(authorPrincipal.memberId);
 
     this.checkText([input.title, input.bodyEn, input.bodyHi]);
     await this.checkImageOwned(input.imageId, authorPrincipal.memberId, "SHOK_SANDESH_PHOTO");
@@ -210,7 +219,13 @@ export class NoticesService {
     const now = this.clock.now();
     const noticeId = generateUuid();
 
-    const createdNotice = await this.db.$transaction(async (tx) => {
+    const created = await this.db.$transaction(async (tx) => {
+      await this.checkPostingCap(tx, authorPrincipal.memberId, dateToIstDate(now));
+      let archivalNotification: {
+        readonly memberIds: readonly string[];
+        readonly message: NoticePushMessage;
+      } | null = null;
+
       // If linkedMemberId is supplied and ACTIVE, open ArchivalRequest
       if (input.linkedMemberId) {
         const isActive = await this.register.isActiveMember(input.linkedMemberId);
@@ -220,7 +235,6 @@ export class NoticesService {
             const archivalRequestId = generateUuid();
             const expiresAt = new Date(now.getTime() + this.config.archivalEscalationDays * DAY_MS);
 
-            // Create ArchivalRequest (enforces database partial uniqueness)
             await tx.archivalRequest.create({
               data: {
                 id: archivalRequestId,
@@ -236,31 +250,33 @@ export class NoticesService {
               },
             });
 
-            // Notify adult members of deceased's family (excluding Shok Sandesh author)
             const recipientIds = await this.register.adultMembersOfFamily(
               deceasedFamily.familyId,
               authorPrincipal.memberId,
             );
             if (recipientIds.length > 0) {
-              await this.notifications.send(recipientIds, {
-                topic: "ARCHIVAL_REQUEST",
-                subjectId: archivalRequestId,
-                title: {
-                  en: "Archival request for family member",
-                  hi: "परिवार के सदस्य के लिए अभिलेखागार अनुरोध",
+              archivalNotification = {
+                memberIds: recipientIds,
+                message: {
+                  topic: "ARCHIVAL_REQUEST",
+                  subjectId: archivalRequestId,
+                  title: {
+                    en: "Archival request for family member",
+                    hi: "परिवार के सदस्य के लिए अभिलेखागार अनुरोध",
+                  },
+                  body: {
+                    en: "A Shok Sandesh was posted linked to a member of your family.",
+                    hi: "आपके परिवार के सदस्य से जुड़ा एक शोक संदेश प्रकाशित हुआ है।",
+                  },
+                  data: {},
                 },
-                body: {
-                  en: "A Shok Sandesh was posted linked to a member of your family.",
-                  hi: "आपके परिवार के सदस्य से जुड़ा एक शोक संदेश प्रकाशित हुआ है।",
-                },
-                data: {},
-              });
+              };
             }
           }
         }
       }
 
-      return tx.notice.create({
+      const notice = await tx.notice.create({
         data: {
           id: noticeId,
           board: "SHOK_SANDESH",
@@ -281,9 +297,17 @@ export class NoticesService {
           createdAt: now,
         },
       });
+      return { notice, archivalNotification };
     });
 
-    const view = await this.buildNoticeView(authorPrincipal.memberId, createdNotice);
+    if (created.archivalNotification !== null) {
+      await this.notifications.send(
+        created.archivalNotification.memberIds,
+        created.archivalNotification.message,
+      );
+    }
+
+    const view = await this.buildNoticeView(authorPrincipal.memberId, created.notice);
     return { notice: view };
   }
 
@@ -349,7 +373,7 @@ export class NoticesService {
     const now = this.clock.now();
     const reportId = generateUuid();
 
-    const createdReport = await this.db.$transaction(async (tx) => {
+    const created = await this.db.$transaction(async (tx) => {
       const existing = await tx.report.findUnique({
         where: {
           targetId_reporterMemberId: {
@@ -362,7 +386,7 @@ export class NoticesService {
         throw new AppError("ALREADY_REPORTED", 409);
       }
 
-      const rep = await tx.report.create({
+      const report = await tx.report.create({
         data: {
           id: reportId,
           targetType: "NOTICE",
@@ -375,18 +399,20 @@ export class NoticesService {
         },
       });
 
-      // Distinct family count excluding author's family
+      const notifications: Array<{
+        readonly memberIds: readonly string[];
+        readonly message: NoticePushMessage;
+      }> = [];
       const allReports = await tx.report.findMany({
         where: { noticeId, targetType: "NOTICE" },
       });
       const distinctFamilies = new Set(
         allReports
-          .map((r) => r.reporterFamilyId)
-          .filter((fId) => fId !== notice.authorFamilyId),
+          .map((item) => item.reporterFamilyId)
+          .filter((familyId) => familyId !== notice.authorFamilyId),
       );
 
       if (distinctFamilies.size >= this.config.reportsThreshold) {
-        // Hide notice
         await tx.notice.update({
           where: { id: noticeId },
           data: {
@@ -396,10 +422,8 @@ export class NoticesService {
           },
         });
 
-        // Create suspension for author
         const suspensionId = generateUuid();
         const endsAt = new Date(now.getTime() + this.config.suspensionDurationDays * DAY_MS);
-
         await tx.suspension.create({
           data: {
             id: suspensionId,
@@ -414,40 +438,55 @@ export class NoticesService {
           },
         });
 
-        // Notifications to author
-        await this.notifications.send([notice.authorMemberId], {
-          topic: "NOTICE_HIDDEN",
-          subjectId: notice.id,
-          title: {
-            en: "Your notice was hidden",
-            hi: "आपकी सूचना छिपा दी गई है",
+        notifications.push({
+          memberIds: [notice.authorMemberId],
+          message: {
+            topic: "NOTICE_HIDDEN",
+            subjectId: notice.id,
+            title: {
+              en: "Your notice was hidden",
+              hi: "आपकी सूचना छिपा दी गई है",
+            },
+            body: {
+              en: "A notice you published received multiple community reports and was hidden.",
+              hi: "आपकी प्रकाशित सूचना पर कई रिपोर्ट मिलीं और उसे छिपा दिया गया है।",
+            },
+            data: {},
           },
-          body: {
-            en: "A notice you published received multiple community reports and was hidden.",
-            hi: "आपकी प्रकाशित सूचना पर कई रिपोर्ट मिलीं और उसे छिपा दिया गया है।",
-          },
-          data: {},
         });
-
-        await this.notifications.send([notice.authorMemberId], {
-          topic: "SUSPENSION",
-          subjectId: suspensionId,
-          title: {
-            en: "Posting privileges suspended",
-            hi: "पोस्ट करने की सुविधा निलंबित कर दी गई है",
+        notifications.push({
+          memberIds: [notice.authorMemberId],
+          message: {
+            topic: "SUSPENSION",
+            subjectId: suspensionId,
+            title: {
+              en: "Posting privileges suspended",
+              hi: "पोस्ट करने की सुविधा निलंबित कर दी गई है",
+            },
+            body: {
+              en: `Your posting ability is suspended until ${endsAt.toISOString().slice(0, 10)}.`,
+              hi: `आपकी पोस्ट करने की सुविधा ${endsAt.toISOString().slice(0, 10)} तक निलंबित है।`,
+            },
+            data: {},
           },
-          body: {
-            en: `Your posting ability is suspended until ${endsAt.toISOString().slice(0, 10)}.`,
-            hi: `आपकी पोस्ट करने की सुविधा ${endsAt.toISOString().slice(0, 10)} तक निलंबित है।`,
-          },
-          data: {},
         });
       }
 
-      return rep;
+      return { report, notifications };
     });
 
-    return { report: createdReport };
+    const notificationResults = await Promise.allSettled(
+      created.notifications.map((notification) => this.notifications.send(
+        notification.memberIds,
+        notification.message,
+      )),
+    );
+    for (const result of notificationResults) {
+      if (result.status === "rejected") throw result.reason;
+    }
+
+    return { report: created.report };
+
   }
 
   async reportBloodSos(
@@ -504,7 +543,6 @@ export class NoticesService {
   ): Promise<{ readonly listing: BusinessListingView }> {
     this.checkBoardOpen();
     await this.checkSuspension(authorPrincipal.memberId);
-    await this.checkPostingCap(authorPrincipal.memberId);
 
     if (this.business.checkEligibility) {
       const eligible = await this.business.checkEligibility(authorPrincipal.memberId);
@@ -526,6 +564,7 @@ export class NoticesService {
     const cityKey = normalizeCityKey(input.businessCity);
 
     const { notice, meta } = await this.db.$transaction(async (tx) => {
+      await this.checkPostingCap(tx, authorPrincipal.memberId, dateToIstDate(now));
       const createdNotice = await tx.notice.create({
         data: {
           id: noticeId,
@@ -666,6 +705,10 @@ export class NoticesService {
     } else {
       await this.business.refund(payment.id, "PUBLICATION_FAILED");
     }
+  }
+
+  async onBusinessListingPaymentRefunded(paymentId: string): Promise<void> {
+    await this.business.markConsumed(paymentId);
   }
 
   async listBusinessListings(
@@ -1243,6 +1286,13 @@ export class NoticesService {
       },
     });
     return request !== null;
+  }
+
+  async handleImageRemoved(tx: NoticesTxClient, imageId: string): Promise<void> {
+    await tx.notice.updateMany({
+      where: { imageId },
+      data: { imageId: null },
+    });
   }
 
   async handleMemberErased(tx: NoticesTxClient, memberId: string): Promise<void> {

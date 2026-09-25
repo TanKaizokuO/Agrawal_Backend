@@ -7,7 +7,7 @@
 #   docker build -t agrawal-api:latest .
 #
 # Production deployment executes:
-#   docker run --rm --env-file .env.production agrawal-api:latest npx prisma migrate deploy --schema prisma/schema --config prisma.config.ts
+#   IMAGE_URI=agrawal-api:latest docker compose --profile migration -f deploy/docker-compose.production.yml run --rm --no-deps migration-prod
 #   docker compose -f deploy/docker-compose.production.yml up -d
 # ==============================================================================
 
@@ -54,6 +54,9 @@ RUN npm run prisma:generate
 # Build TypeScript to JavaScript in dist/
 RUN npm run build
 
+# Keep Prisma CLI as a production dependency for the migration service; remove build/test tooling from the image.
+RUN npm prune --omit=dev
+
 # ------------------------------------------------------------------------------
 # Stage 3: Production Runner
 # ------------------------------------------------------------------------------
@@ -68,11 +71,12 @@ ENV PATH="/app/node_modules/.bin:${PATH}"
 COPY --from=builder /app/node_modules /app/node_modules
 COPY --from=builder /app/package.json /app/package-lock.json* /app/
 
-# Copy compiled dist, Prisma configuration, schemas, and sources
+# Copy compiled application output and Prisma migration resources/configuration.
 COPY --from=builder /app/dist /app/dist
 COPY --from=builder /app/prisma /app/prisma
 COPY --from=builder /app/prisma.config.ts* /app/
-COPY --from=builder /app/src /app/src
+# Copy the RDS CA bundle from the build context with permissions readable by node.
+COPY --chown=node:node --chmod=0644 global-bundle.pem /etc/ssl/certs/global-bundle.pem
 # Drop root privileges: use built-in node user
 RUN chown -R node:node /app
 USER node

@@ -170,6 +170,7 @@ export type RefundReason = (typeof RefundReason)[keyof typeof RefundReason]
 
 export const RefundStatus = {
   REQUESTED: 'REQUESTED',
+  PROCESSING: 'PROCESSING',
   PROCESSED: 'PROCESSED',
   FAILED: 'FAILED'
 } as const

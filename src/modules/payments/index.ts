@@ -8,7 +8,6 @@ import type { PaymentTxClient } from "./db.js";
 export {
   PaymentService,
   extractIdentity,
-  verifyWebhookSignature,
   verifyCheckoutSignature,
   type PaymentServiceConfig,
   type PaymentServiceDeps,
@@ -27,6 +26,14 @@ export {
 } from "./service.js";
 
 export {
+  PaymentWebhookService,
+  verifyWebhookSignature,
+  type PaymentWebhookEffects,
+  type PaymentWebhookLogger,
+  type PaymentWebhookServiceDeps,
+} from "./webhooks.js";
+
+export {
   PaymentCapturedPayload,
   paymentCapturedJobName,
 } from "./events.js";
@@ -41,7 +48,7 @@ export {
   createPaymentRoutes,
   createWebhookHandler,
   paymentRouteManifest,
-  type PaymentRouteDeps,
+  type PaymentWebhookRouteDeps,
 } from "./routes.js";
 
 export {

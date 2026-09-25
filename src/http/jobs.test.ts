@@ -12,7 +12,9 @@ describe("HTTP maintenance workers", () => {
     let purgedBefore: Date | undefined;
     const store: IdempotencyStore = {
       find: () => Promise.resolve(null),
-      create: () => Promise.resolve(),
+      claim: () => Promise.resolve(false),
+      complete: () => Promise.resolve(),
+      release: () => Promise.resolve(),
       purge: (before) => {
         purgedBefore = before;
         return Promise.resolve(4);

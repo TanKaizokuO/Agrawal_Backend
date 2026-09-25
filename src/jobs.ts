@@ -9,6 +9,8 @@ export interface JobSendOptions {
   readonly startAfter?: Date | string;
   readonly retryLimit?: number;
   readonly retryBackoff?: boolean;
+  readonly singletonKey?: string;
+  readonly singletonSeconds?: number;
 }
 
 export type JobHandler = (payload: unknown) => Promise<void> | void;
@@ -33,10 +35,12 @@ export interface RecurringJobSchedule extends JobSchedule {
 }
 
 export interface JobRuntime {
+  /** Whether this process registers local workers and schedules; it does not gate send. */
   readonly enabled: boolean;
   start(): Promise<void>;
   stop(): Promise<void>;
   isReady(): Promise<boolean>;
+  /** Enqueue work even when this process does not consume it locally. */
   send(name: string, payload: unknown, options?: JobSendOptions): Promise<string | null>;
   registerWorker(registration: WorkerRegistration): Promise<void>;
   schedule?(
@@ -60,7 +64,7 @@ class PgBossRuntime implements JobRuntime {
   ) {}
 
   async start(): Promise<void> {
-    if (!this.enabled || this.started) return;
+    if (this.started) return;
     await this.boss.start();
     this.started = true;
   }
@@ -85,7 +89,7 @@ class PgBossRuntime implements JobRuntime {
   }
 
   isReady(): Promise<boolean> {
-    return Promise.resolve(!this.enabled || this.started);
+    return Promise.resolve(this.started);
   }
 
   async send(
@@ -93,7 +97,7 @@ class PgBossRuntime implements JobRuntime {
     payload: unknown,
     options?: JobSendOptions,
   ): Promise<string | null> {
-    if (!this.enabled || !this.started) {
+    if (!this.started) {
       throw new Error("The job runtime is not started");
     }
     if (
@@ -143,6 +147,7 @@ class PgBossRuntime implements JobRuntime {
 
 export interface JobRuntimeOptions {
   readonly connectionString: string;
+  /** Controls local worker and schedule registration only. */
   readonly enabled?: boolean;
   readonly onError?: (error: Error) => void;
 }

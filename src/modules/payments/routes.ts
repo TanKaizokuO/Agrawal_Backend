@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { AppError } from "../../http/errors.js";
 import { requirePrincipal } from "../../http/auth.js";
 import { validate } from "../../http/validate.js";
-import { isRecord } from "./guards.js";
 import type { PaymentView, PaymentViewer, PaymentService } from "./service.js";
+import type { PaymentWebhookService } from "./webhooks.js";
 import {
   ConfirmPaymentBody,
   ConfirmPaymentParams,
@@ -25,6 +25,10 @@ export const paymentRouteManifest = defineRouteManifest({
 
 export interface PaymentRouteDeps {
   readonly service: PaymentService;
+}
+
+export interface PaymentWebhookRouteDeps {
+  readonly webhookService: PaymentWebhookService;
 }
 
 function viewer(request: Request): PaymentViewer {
@@ -82,7 +86,7 @@ export function createPaymentRoutes(deps: PaymentRouteDeps): Router {
  * request bytes, so parsing before verification would make the signature
  * unverifiable and would allow malformed requests to reach persistence.
  */
-export function createWebhookHandler(deps: PaymentRouteDeps) {
+export function createWebhookHandler(deps: PaymentWebhookRouteDeps) {
   return async (request: Request, response: Response): Promise<void> => {
     const signature = request.get("X-Razorpay-Signature");
     const eventId = request.get("x-razorpay-event-id");
@@ -90,31 +94,11 @@ export function createWebhookHandler(deps: PaymentRouteDeps) {
       response.status(400).json({ error: "invalid webhook" });
       return;
     }
-    const rawBody: Buffer = request.body;
-    if (!deps.service.verifyWebhook(rawBody, signature)) {
-      console.warn("invalid webhook signature");
+    const accepted = await deps.webhookService.receive(request.body, signature, eventId);
+    if (!accepted) {
       response.status(400).json({ error: "invalid webhook" });
       return;
     }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawBody.toString("utf8"));
-    } catch {
-      response.status(400).json({ error: "invalid webhook" });
-      return;
-    }
-    if (!isRecord(parsed)) {
-      response.status(400).json({ error: "invalid webhook" });
-      return;
-    }
-    const eventType = typeof parsed.event === "string" ? parsed.event : "";
-    if (eventId.trim().length === 0 || eventType.trim().length === 0) {
-      response.status(400).json({ error: "invalid webhook" });
-      return;
-    }
-
-    await deps.service.ingestWebhookEvent(eventId, eventType, parsed);
     response.status(200).json({ ok: true });
   };
 }

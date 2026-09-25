@@ -106,10 +106,35 @@ export const PatchMeBody = z.object({
 });
 export type PatchMeInput = z.infer<typeof PatchMeBody>;
 
-export const PutConsentsBody = z.object({
-  bloodGroupMatching: z.boolean(),
-  photoVisible: z.boolean(),
-});
+export const PutConsentsBody = z.preprocess(
+  (value, context) => {
+    if (
+      typeof value === "object"
+      && value !== null
+      && "directory" in value
+      && value.directory === false
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["directory"],
+        message: "Directory consent is withdrawn through Erasure, not this endpoint.",
+      });
+      return z.NEVER;
+    }
+    return value;
+  },
+  z.object({
+    directory: z.literal(true).optional(),
+    bloodGroupMatching: z.boolean().optional(),
+    photoVisible: z.boolean().optional(),
+  }).strict().refine(
+    (input) =>
+      input.directory !== undefined
+      || input.bloodGroupMatching !== undefined
+      || input.photoVisible !== undefined,
+    "At least one consent toggle must be provided.",
+  ),
+);
 export type PutConsentsInput = z.infer<typeof PutConsentsBody>;
 
 export const PutNomineeBody = z.object({

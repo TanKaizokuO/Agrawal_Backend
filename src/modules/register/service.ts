@@ -8,6 +8,7 @@ import type { Clock } from "../../clock.js";
 import type { PincodeDirectory, ObjectStore, Romanizer } from "../../adapters/ports.js";
 import type { JobRuntime } from "../../jobs.js";
 import type { ProcessingMetadata } from "../officer/index.js";
+import type { ImageRemovedEvent } from "../media/index.js";
 import type {
   Actor,
   BilingualName,
@@ -95,6 +96,7 @@ export interface MediaPort {
     purpose: "MEMBER_PHOTO" | "FAMILY_PHOTO",
   ): Promise<boolean>;
 }
+
 export interface RegisterSuspensionResolver {
   resolveActiveSuspension(memberId: string): Promise<MemberSuspensionView | null>;
 }
@@ -513,6 +515,7 @@ export class RegisterService {
   // Visibility projections (invariants 16, 20, 22)
   // -----------------------------------------------------------------------
 
+  // Shared module projections preserve Members; directory consent is enforced in directory queries.
   async project(
     viewerMemberId: string,
     memberIds: readonly string[],
@@ -824,19 +827,26 @@ export class RegisterService {
   async updateConsents(memberId: string, input: PutConsentsInput): Promise<void> {
     const member = await this.db.member.findUnique({
       where: { id: memberId },
-      select: { consentBloodGroup: true, consentPhoto: true },
+      select: { consentDirectory: true, consentBloodGroup: true, consentPhoto: true },
     });
     if (!member) throw new AppError("MEMBER_NOT_FOUND", 404);
 
     const now = this.clock.now();
-    const events: Array<{ toggle: "BLOOD_GROUP" | "PHOTO"; value: boolean }> = [];
+    const events: Array<{ toggle: "DIRECTORY" | "BLOOD_GROUP" | "PHOTO"; value: boolean }> = [];
     const update: Prisma.MemberUpdateInput = {};
 
-    if (input.bloodGroupMatching !== member.consentBloodGroup) {
+    if (input.directory === true && !member.consentDirectory) {
+      events.push({ toggle: "DIRECTORY", value: true });
+      update.consentDirectory = true;
+    }
+    if (
+      input.bloodGroupMatching !== undefined
+      && input.bloodGroupMatching !== member.consentBloodGroup
+    ) {
       events.push({ toggle: "BLOOD_GROUP", value: input.bloodGroupMatching });
       update.consentBloodGroup = input.bloodGroupMatching;
     }
-    if (input.photoVisible !== member.consentPhoto) {
+    if (input.photoVisible !== undefined && input.photoVisible !== member.consentPhoto) {
       events.push({ toggle: "PHOTO", value: input.photoVisible });
       update.consentPhoto = input.photoVisible;
     }
@@ -914,6 +924,22 @@ export class RegisterService {
   // -----------------------------------------------------------------------
   // Photo
   // -----------------------------------------------------------------------
+
+  async handleImageRemoved(tx: Tx, event: ImageRemovedEvent): Promise<void> {
+    if (event.purpose === "MEMBER_PHOTO") {
+      await tx.member.updateMany({
+        where: { photoImageId: event.imageId },
+        data: { photoImageId: null },
+      });
+      return;
+    }
+    if (event.purpose === "FAMILY_PHOTO") {
+      await tx.family.updateMany({
+        where: { photoImageId: event.imageId },
+        data: { photoImageId: null },
+      });
+    }
+  }
 
   async setMemberPhoto(memberId: string, imageId: string | null): Promise<void> {
     if (imageId !== null) await this.assertPhotoOwned(imageId, { memberId }, "MEMBER_PHOTO");
@@ -1325,7 +1351,19 @@ export class RegisterService {
     input: DirectorySearchInput,
   ): Promise<{ items: MemberProjection[]; nextCursor: string | null }> {
     const queryText = input.q?.trim() ?? "";
-    const filters: Prisma.Sql[] = [Prisma.sql`m.status = 'ACTIVE'`];
+    const filters: Prisma.Sql[] = [
+      Prisma.sql`m.status = 'ACTIVE'`,
+      Prisma.sql`(
+        m.consent_directory = TRUE
+        OR m.id = ${viewerMemberId}
+        OR EXISTS (
+          SELECT 1
+          FROM family_link viewer_fl
+          WHERE viewer_fl.member_id = ${viewerMemberId}
+            AND viewer_fl.family_id = fl.family_id
+        )
+      )`,
+    ];
     let orderBy = Prisma.sql`m.name_en ASC NULLS LAST, m.name_hi ASC NULLS LAST`;
 
     if (/^AGR-/iu.test(queryText)) {
@@ -1407,10 +1445,28 @@ export class RegisterService {
   ): Promise<MemberProjection> {
     const member = await this.db.member.findUnique({
       where: { id: memberId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        consentDirectory: true,
+        link: { select: { familyId: true } },
+      },
     });
     if (!member || member.status !== "ACTIVE") {
       throw new AppError("MEMBER_NOT_FOUND", 404);
+    }
+    if (!member.consentDirectory && member.id !== viewerMemberId) {
+      const viewerLink = await this.db.familyLink.findUnique({
+        where: { memberId: viewerMemberId },
+        select: { familyId: true },
+      });
+      if (
+        member.link === null
+        || viewerLink === null
+        || member.link.familyId !== viewerLink.familyId
+      ) {
+        throw new AppError("MEMBER_NOT_FOUND", 404);
+      }
     }
     const projections = await this.project(viewerMemberId, [memberId]);
     const p = projections.get(memberId);
@@ -1426,17 +1482,22 @@ export class RegisterService {
       where: { publicId },
       include: {
         links: {
-          select: { memberId: true, member: { select: { status: true } } },
+          select: {
+            memberId: true,
+            member: { select: { status: true, consentDirectory: true } },
+          },
         },
       },
     });
     if (!family) throw new AppError("FAMILY_NOT_FOUND", 404);
 
-    const activeMemberIds = family.links
-      .filter((l) => l.member.status === "ACTIVE")
-      .map((l) => l.memberId);
-
-    const projections = await this.project(viewerMemberId, activeMemberIds);
+    const viewerIsFamilyMember = family.links.some((link) => link.memberId === viewerMemberId);
+    const visibleMemberIds = family.links
+      .filter((link) => link.member.status === "ACTIVE")
+      .filter((link) => link.member.consentDirectory || viewerIsFamilyMember)
+      .map((link) => link.memberId);
+    const visibleMembers = new Set(visibleMemberIds);
+    const projections = await this.project(viewerMemberId, visibleMemberIds);
 
     return {
       family: {
@@ -1444,8 +1505,10 @@ export class RegisterService {
         publicId: family.publicId,
         gotra: family.gotra,
         status: family.status,
-        headMemberId: family.headMemberId,
-        memberCount: activeMemberIds.length,
+        headMemberId: family.headMemberId !== null && visibleMembers.has(family.headMemberId)
+          ? family.headMemberId
+          : null,
+        memberCount: visibleMemberIds.length,
       },
       members: [...projections.values()],
     };

@@ -147,7 +147,7 @@ Populate every required field from `Agrawal_Backend/.env.example` in SSM, includ
 - Registration, retention, Noticeboard, Blood SOS, media, and session tuning values.
 - `ERASURE_SELF_SERVICE_ENABLED` only after recent-authentication behavior is verified.
 
-Production must not use the placeholder `https://register.example.in` origin.
+Production must set the actual frontend origin explicitly in `WEB_ORIGINS`; a missing or blank SSM parameter aborts deployment before migrations, and application config rejects missing or empty origin lists at startup.
 
 ## 5. Staging acceptance
 

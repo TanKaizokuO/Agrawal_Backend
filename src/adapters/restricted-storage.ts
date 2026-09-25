@@ -32,7 +32,15 @@ interface RefundRow {
   readonly status: string;
   readonly requestedAt: Date;
   readonly processedAt: Date | null;
+  readonly attemptNumber: number;
   readonly failureReason: string | null;
+}
+
+interface RefundAttemptRow {
+  readonly refundId: string;
+  readonly attemptNumber: number;
+  readonly razorpayRefundId: string | null;
+  readonly createdAt: Date;
 }
 
 export class PrismaRestrictedStorageMover implements RestrictedStorageMover {
@@ -44,8 +52,12 @@ export class PrismaRestrictedStorageMover implements RestrictedStorageMover {
     const payments: PaymentRow[] = await tx.payment.findMany({ where: { payerMemberId } });
     if (payments.length === 0) return;
     const ids = payments.map((payment: PaymentRow) => payment.id);
-    const refunds = await tx.refund.findMany({
-      where: { paymentId: { in: [...ids] } },
+    const refunds: RefundRow[] = await tx.refund.findMany({
+      where: { paymentId: { in: ids } },
+    });
+    const refundIds = refunds.map((refund: RefundRow) => refund.id);
+    const attempts: RefundAttemptRow[] = await tx.refundAttempt.findMany({
+      where: { refundId: { in: refundIds } },
     });
 
     for (const payment of payments) {
@@ -53,6 +65,12 @@ export class PrismaRestrictedStorageMover implements RestrictedStorageMover {
     }
     for (const refund of refunds) {
       await this.copyRefund(tx, refund, retainUntil);
+    }
+    for (const attempt of attempts) {
+      await this.copyRefundAttempt(tx, attempt, retainUntil);
+    }
+    if (refundIds.length > 0) {
+      await tx.refundAttempt.deleteMany({ where: { refundId: { in: refundIds } } });
     }
     for (const refund of refunds) {
       await tx.$executeRaw`DELETE FROM refund WHERE id = ${refund.id}`;
@@ -92,12 +110,27 @@ export class PrismaRestrictedStorageMover implements RestrictedStorageMover {
     await tx.$executeRaw`
       INSERT INTO restricted.refund (
         id, payment_id, reason, amount_paise, razorpay_refund_id, status,
-        requested_at, processed_at, failure_reason, retain_until
+        requested_at, processed_at, attempt_number, failure_reason, retain_until
       ) VALUES (
         ${refund.id}, ${refund.paymentId}, ${refund.reason}, ${refund.amountPaise},
         ${refund.razorpayRefundId}, ${refund.status}, ${refund.requestedAt},
-        ${refund.processedAt}, ${refund.failureReason}, ${retainUntil}
+        ${refund.processedAt}, ${refund.attemptNumber}, ${refund.failureReason}, ${retainUntil}
       ) ON CONFLICT (id) DO NOTHING
+    `;
+  }
+
+  private async copyRefundAttempt(
+    tx: PaymentTxClient,
+    attempt: RefundAttemptRow,
+    retainUntil: Date,
+  ): Promise<void> {
+    await tx.$executeRaw`
+      INSERT INTO restricted.refund_attempt (
+        refund_id, attempt_number, razorpay_refund_id, created_at, retain_until
+      ) VALUES (
+        ${attempt.refundId}, ${attempt.attemptNumber}, ${attempt.razorpayRefundId},
+        ${attempt.createdAt}, ${retainUntil}
+      ) ON CONFLICT (refund_id, attempt_number) DO NOTHING
     `;
   }
 }

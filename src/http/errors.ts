@@ -22,6 +22,7 @@ export const ERROR_MESSAGES = {
     hi: "Idempotency-Key पहले किसी अलग अनुरोध में उपयोग हो चुका है।",
   },
   INTERNAL: { en: "An unexpected error occurred.", hi: "एक अनपेक्षित त्रुटि हुई।" },
+  PAYLOAD_TOO_LARGE: { en: "The request body is too large.", hi: "अनुरोध का मुख्य भाग बहुत बड़ा है।" },
   UPSTREAM_UNAVAILABLE: {
     en: "A required upstream service is unavailable.",
     hi: "आवश्यक बाहरी सेवा उपलब्ध नहीं है।",
@@ -177,6 +178,19 @@ function isUniqueViolation(error: unknown): boolean {
       (error as { code?: unknown }).code === "P2002");
 }
 
+function bodyParserError(error: unknown): AppError | null {
+  if (typeof error !== "object" || error === null || !("type" in error)) {
+    return null;
+  }
+  if (error.type === "entity.parse.failed") {
+    return new AppError("VALIDATION_FAILED", 400);
+  }
+  if (error.type === "entity.too.large") {
+    return new AppError("PAYLOAD_TOO_LARGE", 413);
+  }
+  return null;
+}
+
 export function errorMiddleware(logger?: ErrorLogger): ErrorRequestHandler {
   return (error: unknown, request, response, next) => {
     if (response.headersSent) {
@@ -192,10 +206,13 @@ export function errorMiddleware(logger?: ErrorLogger): ErrorRequestHandler {
           ? String(requestIdValue)
           : "unknown";
     let appError: AppError;
+    const parseError = bodyParserError(error);
     if (error instanceof AppError) {
       appError = error;
     } else if (error instanceof z.ZodError) {
       appError = new AppError("VALIDATION_FAILED", 400, validationDetails(error));
+    } else if (parseError !== null) {
+      appError = parseError;
     } else if (isUniqueViolation(error)) {
       appError = new AppError("CONFLICT", 409);
     } else {

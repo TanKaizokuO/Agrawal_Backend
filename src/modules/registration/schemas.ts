@@ -189,7 +189,7 @@ const PaymentStatus = z.object({
   amountPaise: z.number().int().nonnegative(),
   currency: z.string(),
   refund: z.object({
-    status: z.enum(["REQUESTED", "PROCESSED", "FAILED"]),
+    status: z.enum(["REQUESTED", "PROCESSING", "PROCESSED", "FAILED"]),
     reason: z.string(),
   }).nullable(),
 });

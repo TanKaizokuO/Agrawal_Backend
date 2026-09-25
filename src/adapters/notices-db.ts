@@ -24,31 +24,7 @@ import type {
   SuspensionWhereInput,
 } from "../modules/notices/index.js";
 import type { Actor, RegisterService } from "../modules/register/index.js";
-import { isRecord } from "./guards.js";
-
-function jsonValue(value: unknown): Prisma.InputJsonValue | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "bigint") return value.toString();
-  if (value instanceof Date) return value.toISOString();
-  if (Array.isArray(value)) {
-    return value.map(jsonValue);
-  }
-  if (isRecord(value)) {
-    const result: Record<string, Prisma.InputJsonValue | null> = {};
-    for (const [key, item] of Object.entries(value)) {
-      result[key] = jsonValue(item);
-    }
-    return result;
-  }
-  return JSON.stringify(value);
-}
-
-function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (value === null) return Prisma.JsonNull;
-  const result = jsonValue(value);
-  return result === null ? Prisma.JsonNull : result;
-}
+import { jsonInputValue } from "./prisma-json.js";
 
 function isNoticeOrderByArray(input: NoticeOrderByInput | readonly NoticeOrderByInput[]): input is readonly NoticeOrderByInput[] {
   return Array.isArray(input);
@@ -62,6 +38,7 @@ function noticeWhere(input: NoticeWhereInput | undefined): Prisma.NoticeWhereInp
   if (input === undefined) return undefined;
   return {
     ...(input.id === undefined ? {} : { id: input.id }),
+    ...(input.imageId === undefined ? {} : { imageId: input.imageId }),
     ...(input.board === undefined ? {} : { board: input.board }),
     ...(input.status === undefined
       ? {}
@@ -182,7 +159,7 @@ function noticeCreate(data: NoticeCreateData): Prisma.NoticeUncheckedCreateInput
     ...(data.bodyEn === undefined ? {} : { bodyEn: data.bodyEn }),
     ...(data.linkedMemberId === undefined ? {} : { linkedMemberId: data.linkedMemberId }),
     ...(data.imageId === undefined ? {} : { imageId: data.imageId }),
-    ...(data.metadata === undefined ? {} : { metadata: data.metadata === null ? Prisma.JsonNull : jsonInput(data.metadata) }),
+    ...(data.metadata === undefined ? {} : { metadata: data.metadata === null ? Prisma.JsonNull : jsonInputValue(data.metadata) }),
     ...(data.paymentId === undefined ? {} : { paymentId: data.paymentId }),
     ...(data.publishedAt === undefined ? {} : { publishedAt: data.publishedAt }),
     ...(data.expiresAt === undefined ? {} : { expiresAt: data.expiresAt }),
@@ -203,7 +180,7 @@ function noticeUpdate(data: Partial<NoticeRow>): Prisma.NoticeUncheckedUpdateInp
     ...(data.bodyEn === undefined ? {} : { bodyEn: data.bodyEn }),
     ...(data.linkedMemberId === undefined ? {} : { linkedMemberId: data.linkedMemberId }),
     ...(data.imageId === undefined ? {} : { imageId: data.imageId }),
-    ...(data.metadata === undefined ? {} : { metadata: data.metadata === null ? Prisma.JsonNull : jsonInput(data.metadata) }),
+    ...(data.metadata === undefined ? {} : { metadata: data.metadata === null ? Prisma.JsonNull : jsonInputValue(data.metadata) }),
     ...(data.paymentId === undefined ? {} : { paymentId: data.paymentId }),
     ...(data.publishedAt === undefined ? {} : { publishedAt: data.publishedAt }),
     ...(data.expiresAt === undefined ? {} : { expiresAt: data.expiresAt }),
@@ -241,6 +218,17 @@ export class PrismaNoticesTx implements NoticesTxClient {
   public readonly archivalRequest: ArchivalRequestDelegate;
   public readonly report: ReportDelegate;
   public readonly suspension: SuspensionDelegate;
+
+  public async lockMemberForNotice(memberId: string): Promise<boolean> {
+    const tx = this.rawTx;
+    if (tx === undefined) {
+      throw new Error("Posting cap checks require a valid Prisma transaction");
+    }
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM member WHERE id = ${memberId} FOR UPDATE
+    `;
+    return rows.length > 0;
+  }
 
   public constructor(
     private readonly raw: Pick<PrismaClient, "notice" | "businessListingMeta" | "archivalRequest" | "report" | "suspension" | "processingRecord">,

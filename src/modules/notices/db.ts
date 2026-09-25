@@ -126,13 +126,14 @@ export interface SuspensionCreateData {
 
 export interface NoticeWhereInput {
   readonly id?: string;
+  readonly imageId?: string;
   readonly board?: NoticeBoardType;
   readonly status?: NoticeStatusType | { readonly in?: readonly NoticeStatusType[]; readonly not?: NoticeStatusType };
   readonly authorMemberId?: string;
   readonly authorFamilyId?: string;
   readonly linkedMemberId?: string | null;
   readonly expiresAt?: { readonly lte?: Date; readonly gt?: Date };
-  readonly createdAt?: { readonly gte?: Date; readonly lte?: Date };
+  readonly createdAt?: { readonly gte?: Date; readonly lt?: Date; readonly lte?: Date };
 }
 
 export interface NoticeOrderByInput {
@@ -245,7 +246,7 @@ export interface SuspensionDelegate {
   deleteMany(args?: { readonly where?: SuspensionWhereInput }): Promise<{ readonly count: number }>;
 }
 
-export interface NoticesTxClient {
+interface NoticesDataClient {
   readonly notice: NoticeDelegate;
   readonly businessListingMeta: BusinessListingMetaDelegate;
   readonly archivalRequest: ArchivalRequestDelegate;
@@ -253,7 +254,12 @@ export interface NoticesTxClient {
   readonly suspension: SuspensionDelegate;
 }
 
-export interface NoticesDatabase extends NoticesTxClient {
+export interface NoticesTxClient extends NoticesDataClient {
+  /** Locks the posting Member until the surrounding transaction completes. */
+  lockMemberForNotice(memberId: string): Promise<boolean>;
+}
+
+export interface NoticesDatabase extends NoticesDataClient {
   $transaction<T>(fn: (tx: NoticesTxClient) => Promise<T>): Promise<T>;
 }
 
@@ -267,6 +273,8 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
   private archivalRequests: ArchivalRequestRow[] = [];
   private reports: ReportRow[] = [];
   private suspensions: SuspensionRow[] = [];
+  // Shared arrays require serialized snapshots for rollback-safe concurrent transactions.
+  private transactionTail: Promise<void> = Promise.resolve();
 
   readonly notice: NoticeDelegate;
   readonly businessListingMeta: BusinessListingMetaDelegate;
@@ -283,7 +291,13 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
   }
 
   async $transaction<T>(fn: (tx: NoticesTxClient) => Promise<T>): Promise<T> {
-    // Snapshot state for atomic rollback on failure
+    const previous = this.transactionTail;
+    let release!: () => void;
+    this.transactionTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+
     const noticesBackup = [...this.notices];
     const metasBackup = [...this.businessListingMetas];
     const archivalsBackup = [...this.archivalRequests];
@@ -299,7 +313,13 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
       this.reports = reportsBackup;
       this.suspensions = suspensionsBackup;
       throw error;
+    } finally {
+      release();
     }
+  }
+
+  lockMemberForNotice(memberId: string): Promise<boolean> {
+    return Promise.resolve(memberId.length > 0);
   }
 
   private createNoticeDelegate(): NoticeDelegate {
@@ -398,6 +418,7 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
     if (!where) return [...this.notices];
     return this.notices.filter((n) => {
       if (where.id !== undefined && n.id !== where.id) return false;
+      if (where.imageId !== undefined && n.imageId !== where.imageId) return false;
       if (where.board !== undefined && n.board !== where.board) return false;
       if (where.status !== undefined) {
         if (typeof where.status === "string") {
@@ -413,6 +434,7 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
       if (where.expiresAt?.lte && (!n.expiresAt || n.expiresAt > where.expiresAt.lte)) return false;
       if (where.expiresAt?.gt && (!n.expiresAt || n.expiresAt <= where.expiresAt.gt)) return false;
       if (where.createdAt?.gte && n.createdAt < where.createdAt.gte) return false;
+      if (where.createdAt?.lt && n.createdAt >= where.createdAt.lt) return false;
       if (where.createdAt?.lte && n.createdAt > where.createdAt.lte) return false;
       return true;
     });

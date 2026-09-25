@@ -17,7 +17,7 @@ model BloodSosRequest {
   patientName       String?            @map("patient_name")
   unitsNeeded       Int?               @map("units_needed")
   note              String?            @map("note")
-  currentTier       Int                @default(1) @map("current_tier")
+  currentTier       Int                @default(0) @map("current_tier")
   donorReachTotal   Int                @default(0) @map("donor_reach_total")
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   expiresAt         DateTime           @map("expires_at") @db.Timestamptz(6)

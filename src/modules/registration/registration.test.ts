@@ -2,7 +2,13 @@ import { v7 as uuidv7 } from "uuid";
 import { describe, expect, it } from "vitest";
 import type { JobRuntime } from "../../jobs.js";
 import type { PaymentView } from "../payments/index.js";
-import { RegistrationService, type RegistrationDeps, type RegistrationTx } from "./index.js";
+import {
+  createRegistrationWorkers,
+  REGISTRATION_JOB_NAMES,
+  RegistrationService,
+  type RegistrationDeps,
+  type RegistrationTx,
+} from "./index.js";
 import { SubmitBody, type SubmitInput } from "./schemas.js";
 import { getTestDatabase } from "../../../test/setup.js";
 
@@ -121,7 +127,12 @@ function harness() {
     identityOf: () => Promise.resolve({ kind: "NONE" as const, hash: null, masked: null }),
     findHeadAnchor: () => Promise.resolve(null),
     createHeadAnchor: () => Promise.resolve(),
-    markConsumed: () => Promise.resolve(),
+    markConsumed: async (tx: RegistrationTx, paymentId: string) => {
+      await tx.payment.updateMany({
+        where: { id: paymentId, consumedAt: null },
+        data: { consumedAt: clock.now() },
+      });
+    },
     refund: (...args: [RegistrationTx, string]): Promise<void> => {
       const paymentId = args[1];
       refunds.push(paymentId);
@@ -183,6 +194,13 @@ function harness() {
     return id;
   }
 
+  async function openForPhone(phoneE164: string): Promise<string> {
+    return db.$transaction(async (tx) => {
+      const opened = await service.openForPhone(tx, phoneE164);
+      return opened.registrationId;
+    });
+  }
+
   return {
     db,
     service,
@@ -190,10 +208,11 @@ function harness() {
     refunds,
     flags,
     detailedFlags,
+    createRegistration,
     get familyCreations() { return familyCreations; },
     get memberCreations() { return memberCreations; },
     get promotions() { return promotions; },
-    createRegistration,
+    openForPhone,
   };
 }
 
@@ -219,6 +238,31 @@ describe("Registration public behavior", () => {
     });
   });
 
+
+  it("consumes a refunded Registration payment through its purpose worker", async () => {
+    const h = harness();
+    const paymentId = uuidv7();
+    const registrationId = await h.createRegistration("+919876543212", "PAID", paymentId);
+    await h.db.payment.create({
+      data: {
+        id: paymentId,
+        purpose: "REGISTRATION",
+        subjectId: registrationId,
+        payerPhoneE164: "+919876543212",
+        amountPaise: 100,
+        status: "REFUNDED",
+        razorpayOrderId: `order-${paymentId}`,
+      },
+    });
+
+    const refundWorker = createRegistrationWorkers(h.service)
+      .find((worker) => worker.name === REGISTRATION_JOB_NAMES.paymentRefunded);
+    if (refundWorker === undefined) throw new Error("Registration refund worker is missing");
+    await refundWorker.handler({ paymentId, subjectId: registrationId });
+
+    await expect(h.db.payment.findUniqueOrThrow({ where: { id: paymentId } }))
+      .resolves.toMatchObject({ consumedAt: clock.now() });
+  });
   it("moves to PAID only from authoritative capture and refunds a late capture once", async () => {
     const h = harness();
     const registrationId = await h.createRegistration("+919876543211", "STARTED");
@@ -233,6 +277,83 @@ describe("Registration public behavior", () => {
     await h.service.onRegistrationPaymentCaptured("payment-3", abandonedId);
     await h.service.onRegistrationPaymentCaptured("payment-3", abandonedId);
     expect(h.refunds).toEqual(["payment-3"]);
+  });
+
+  it("reuses a started registration on repeat sign-in and refreshes its activity", async () => {
+    const h = harness();
+    const phoneE164 = "+919876543212";
+    const registrationId = await h.createRegistration(phoneE164, "STARTED");
+    await h.db.registration.update({
+      where: { id: registrationId },
+      data: { lastActivityAt: new Date(clock.now().getTime() - 25 * 60 * 60 * 1000) },
+    });
+
+    const reopenedId = await h.openForPhone(phoneE164);
+
+    expect(reopenedId).toBe(registrationId);
+    expect(await h.db.registration.findUnique({ where: { id: registrationId } })).toMatchObject({
+      id: registrationId,
+      status: "STARTED",
+      phoneE164,
+      lastActivityAt: clock.now(),
+    });
+    expect(h.refunds).toEqual([]);
+
+    await h.service.abandonIdle();
+
+    expect((await h.db.registration.findUnique({ where: { id: registrationId } }))?.status).toBe("STARTED");
+    expect(h.refunds).toEqual([]);
+  });
+
+  it("starts a fresh registration after an unpaid registration was already cancelled", async () => {
+    const h = harness();
+    const phoneE164 = "+919876543212";
+    const cancelledId = await h.createRegistration(phoneE164, "STARTED");
+    await h.service.cancel(cancelledId, phoneE164);
+
+    const reopenedId = await h.openForPhone(phoneE164);
+
+    expect(reopenedId).not.toBe(cancelledId);
+    expect(await h.db.registration.findUnique({ where: { id: cancelledId } })).toMatchObject({
+      status: "ABANDONED",
+      endReason: "APPLICANT_CANCELLED",
+    });
+    expect(await h.db.registration.findUnique({ where: { id: reopenedId } })).toMatchObject({
+      status: "STARTED",
+      phoneE164,
+    });
+    expect(h.refunds).toEqual([]);
+  });
+
+  it("preserves a paid registration on repeat sign-in and does not refund it as idle", async () => {
+    const h = harness();
+    const phoneE164 = "+919876543212";
+    const paymentId = "payment-repeat-sign-in";
+    const registrationId = await h.createRegistration(phoneE164, "PAID", paymentId);
+    h.payment.set(paymentId, capturedPayment(paymentId));
+    await h.db.registration.update({
+      where: { id: registrationId },
+      data: { lastActivityAt: new Date(clock.now().getTime() - 25 * 60 * 60 * 1000) },
+    });
+
+    const reopenedId = await h.openForPhone(phoneE164);
+
+    expect(reopenedId).toBe(registrationId);
+    expect(await h.db.registration.findUnique({ where: { id: registrationId } })).toMatchObject({
+      id: registrationId,
+      status: "PAID",
+      paymentId,
+      lastActivityAt: clock.now(),
+    });
+    expect(h.refunds).toEqual([]);
+
+    await h.service.abandonIdle();
+
+    expect(await h.db.registration.findUnique({ where: { id: registrationId } })).toMatchObject({
+      status: "PAID",
+      paymentId,
+    });
+    expect(h.refunds).toEqual([]);
   });
 
   it("keeps a joiner out of the register until the receiving Head approves", async () => {

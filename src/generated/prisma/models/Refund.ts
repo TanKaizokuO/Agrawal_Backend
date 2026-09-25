@@ -28,10 +28,12 @@ export type AggregateRefund = {
 
 export type RefundAvgAggregateOutputType = {
   amountPaise: number | null
+  attemptNumber: number | null
 }
 
 export type RefundSumAggregateOutputType = {
   amountPaise: number | null
+  attemptNumber: number | null
 }
 
 export type RefundMinAggregateOutputType = {
@@ -43,6 +45,8 @@ export type RefundMinAggregateOutputType = {
   status: $Enums.RefundStatus | null
   requestedAt: Date | null
   processedAt: Date | null
+  processingStartedAt: Date | null
+  attemptNumber: number | null
   failureReason: string | null
 }
 
@@ -55,6 +59,8 @@ export type RefundMaxAggregateOutputType = {
   status: $Enums.RefundStatus | null
   requestedAt: Date | null
   processedAt: Date | null
+  processingStartedAt: Date | null
+  attemptNumber: number | null
   failureReason: string | null
 }
 
@@ -67,6 +73,8 @@ export type RefundCountAggregateOutputType = {
   status: number
   requestedAt: number
   processedAt: number
+  processingStartedAt: number
+  attemptNumber: number
   failureReason: number
   _all: number
 }
@@ -74,10 +82,12 @@ export type RefundCountAggregateOutputType = {
 
 export type RefundAvgAggregateInputType = {
   amountPaise?: true
+  attemptNumber?: true
 }
 
 export type RefundSumAggregateInputType = {
   amountPaise?: true
+  attemptNumber?: true
 }
 
 export type RefundMinAggregateInputType = {
@@ -89,6 +99,8 @@ export type RefundMinAggregateInputType = {
   status?: true
   requestedAt?: true
   processedAt?: true
+  processingStartedAt?: true
+  attemptNumber?: true
   failureReason?: true
 }
 
@@ -101,6 +113,8 @@ export type RefundMaxAggregateInputType = {
   status?: true
   requestedAt?: true
   processedAt?: true
+  processingStartedAt?: true
+  attemptNumber?: true
   failureReason?: true
 }
 
@@ -113,6 +127,8 @@ export type RefundCountAggregateInputType = {
   status?: true
   requestedAt?: true
   processedAt?: true
+  processingStartedAt?: true
+  attemptNumber?: true
   failureReason?: true
   _all?: true
 }
@@ -212,6 +228,8 @@ export type RefundGroupByOutputType = {
   status: $Enums.RefundStatus
   requestedAt: Date
   processedAt: Date | null
+  processingStartedAt: Date | null
+  attemptNumber: number
   failureReason: string | null
   _count: RefundCountAggregateOutputType | null
   _avg: RefundAvgAggregateOutputType | null
@@ -247,8 +265,11 @@ export type RefundWhereInput = {
   status?: Prisma.EnumRefundStatusFilter<"Refund"> | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFilter<"Refund"> | Date | string
   processedAt?: Prisma.DateTimeNullableFilter<"Refund"> | Date | string | null
+  processingStartedAt?: Prisma.DateTimeNullableFilter<"Refund"> | Date | string | null
+  attemptNumber?: Prisma.IntFilter<"Refund"> | number
   failureReason?: Prisma.StringNullableFilter<"Refund"> | string | null
   payment?: Prisma.XOR<Prisma.PaymentScalarRelationFilter, Prisma.PaymentWhereInput>
+  attempts?: Prisma.RefundAttemptListRelationFilter
 }
 
 export type RefundOrderByWithRelationInput = {
@@ -260,8 +281,11 @@ export type RefundOrderByWithRelationInput = {
   status?: Prisma.SortOrder
   requestedAt?: Prisma.SortOrder
   processedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  processingStartedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
   failureReason?: Prisma.SortOrderInput | Prisma.SortOrder
   payment?: Prisma.PaymentOrderByWithRelationInput
+  attempts?: Prisma.RefundAttemptOrderByRelationAggregateInput
 }
 
 export type RefundWhereUniqueInput = Prisma.AtLeast<{
@@ -276,8 +300,11 @@ export type RefundWhereUniqueInput = Prisma.AtLeast<{
   status?: Prisma.EnumRefundStatusFilter<"Refund"> | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFilter<"Refund"> | Date | string
   processedAt?: Prisma.DateTimeNullableFilter<"Refund"> | Date | string | null
+  processingStartedAt?: Prisma.DateTimeNullableFilter<"Refund"> | Date | string | null
+  attemptNumber?: Prisma.IntFilter<"Refund"> | number
   failureReason?: Prisma.StringNullableFilter<"Refund"> | string | null
   payment?: Prisma.XOR<Prisma.PaymentScalarRelationFilter, Prisma.PaymentWhereInput>
+  attempts?: Prisma.RefundAttemptListRelationFilter
 }, "id" | "razorpayRefundId" | "paymentId">
 
 export type RefundOrderByWithAggregationInput = {
@@ -289,6 +316,8 @@ export type RefundOrderByWithAggregationInput = {
   status?: Prisma.SortOrder
   requestedAt?: Prisma.SortOrder
   processedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  processingStartedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
   failureReason?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.RefundCountOrderByAggregateInput
   _avg?: Prisma.RefundAvgOrderByAggregateInput
@@ -309,6 +338,8 @@ export type RefundScalarWhereWithAggregatesInput = {
   status?: Prisma.EnumRefundStatusWithAggregatesFilter<"Refund"> | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeWithAggregatesFilter<"Refund"> | Date | string
   processedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Refund"> | Date | string | null
+  processingStartedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"Refund"> | Date | string | null
+  attemptNumber?: Prisma.IntWithAggregatesFilter<"Refund"> | number
   failureReason?: Prisma.StringNullableWithAggregatesFilter<"Refund"> | string | null
 }
 
@@ -320,8 +351,11 @@ export type RefundCreateInput = {
   status?: $Enums.RefundStatus
   requestedAt?: Date | string
   processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
   failureReason?: string | null
   payment: Prisma.PaymentCreateNestedOneWithoutRefundsInput
+  attempts?: Prisma.RefundAttemptCreateNestedManyWithoutRefundInput
 }
 
 export type RefundUncheckedCreateInput = {
@@ -333,7 +367,10 @@ export type RefundUncheckedCreateInput = {
   status?: $Enums.RefundStatus
   requestedAt?: Date | string
   processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
   failureReason?: string | null
+  attempts?: Prisma.RefundAttemptUncheckedCreateNestedManyWithoutRefundInput
 }
 
 export type RefundUpdateInput = {
@@ -344,8 +381,11 @@ export type RefundUpdateInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   payment?: Prisma.PaymentUpdateOneRequiredWithoutRefundsNestedInput
+  attempts?: Prisma.RefundAttemptUpdateManyWithoutRefundNestedInput
 }
 
 export type RefundUncheckedUpdateInput = {
@@ -357,7 +397,10 @@ export type RefundUncheckedUpdateInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attempts?: Prisma.RefundAttemptUncheckedUpdateManyWithoutRefundNestedInput
 }
 
 export type RefundCreateManyInput = {
@@ -369,6 +412,8 @@ export type RefundCreateManyInput = {
   status?: $Enums.RefundStatus
   requestedAt?: Date | string
   processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
   failureReason?: string | null
 }
 
@@ -380,6 +425,8 @@ export type RefundUpdateManyMutationInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
@@ -392,6 +439,8 @@ export type RefundUncheckedUpdateManyInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
@@ -414,11 +463,14 @@ export type RefundCountOrderByAggregateInput = {
   status?: Prisma.SortOrder
   requestedAt?: Prisma.SortOrder
   processedAt?: Prisma.SortOrder
+  processingStartedAt?: Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
   failureReason?: Prisma.SortOrder
 }
 
 export type RefundAvgOrderByAggregateInput = {
   amountPaise?: Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
 }
 
 export type RefundMaxOrderByAggregateInput = {
@@ -430,6 +482,8 @@ export type RefundMaxOrderByAggregateInput = {
   status?: Prisma.SortOrder
   requestedAt?: Prisma.SortOrder
   processedAt?: Prisma.SortOrder
+  processingStartedAt?: Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
   failureReason?: Prisma.SortOrder
 }
 
@@ -442,11 +496,19 @@ export type RefundMinOrderByAggregateInput = {
   status?: Prisma.SortOrder
   requestedAt?: Prisma.SortOrder
   processedAt?: Prisma.SortOrder
+  processingStartedAt?: Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
   failureReason?: Prisma.SortOrder
 }
 
 export type RefundSumOrderByAggregateInput = {
   amountPaise?: Prisma.SortOrder
+  attemptNumber?: Prisma.SortOrder
+}
+
+export type RefundScalarRelationFilter = {
+  is?: Prisma.RefundWhereInput
+  isNot?: Prisma.RefundWhereInput
 }
 
 export type RefundCreateNestedManyWithoutPaymentInput = {
@@ -499,6 +561,20 @@ export type EnumRefundStatusFieldUpdateOperationsInput = {
   set?: $Enums.RefundStatus
 }
 
+export type RefundCreateNestedOneWithoutAttemptsInput = {
+  create?: Prisma.XOR<Prisma.RefundCreateWithoutAttemptsInput, Prisma.RefundUncheckedCreateWithoutAttemptsInput>
+  connectOrCreate?: Prisma.RefundCreateOrConnectWithoutAttemptsInput
+  connect?: Prisma.RefundWhereUniqueInput
+}
+
+export type RefundUpdateOneRequiredWithoutAttemptsNestedInput = {
+  create?: Prisma.XOR<Prisma.RefundCreateWithoutAttemptsInput, Prisma.RefundUncheckedCreateWithoutAttemptsInput>
+  connectOrCreate?: Prisma.RefundCreateOrConnectWithoutAttemptsInput
+  upsert?: Prisma.RefundUpsertWithoutAttemptsInput
+  connect?: Prisma.RefundWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.RefundUpdateToOneWithWhereWithoutAttemptsInput, Prisma.RefundUpdateWithoutAttemptsInput>, Prisma.RefundUncheckedUpdateWithoutAttemptsInput>
+}
+
 export type RefundCreateWithoutPaymentInput = {
   id: string
   reason: $Enums.RefundReason
@@ -507,7 +583,10 @@ export type RefundCreateWithoutPaymentInput = {
   status?: $Enums.RefundStatus
   requestedAt?: Date | string
   processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
   failureReason?: string | null
+  attempts?: Prisma.RefundAttemptCreateNestedManyWithoutRefundInput
 }
 
 export type RefundUncheckedCreateWithoutPaymentInput = {
@@ -518,7 +597,10 @@ export type RefundUncheckedCreateWithoutPaymentInput = {
   status?: $Enums.RefundStatus
   requestedAt?: Date | string
   processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
   failureReason?: string | null
+  attempts?: Prisma.RefundAttemptUncheckedCreateNestedManyWithoutRefundInput
 }
 
 export type RefundCreateOrConnectWithoutPaymentInput = {
@@ -559,7 +641,81 @@ export type RefundScalarWhereInput = {
   status?: Prisma.EnumRefundStatusFilter<"Refund"> | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFilter<"Refund"> | Date | string
   processedAt?: Prisma.DateTimeNullableFilter<"Refund"> | Date | string | null
+  processingStartedAt?: Prisma.DateTimeNullableFilter<"Refund"> | Date | string | null
+  attemptNumber?: Prisma.IntFilter<"Refund"> | number
   failureReason?: Prisma.StringNullableFilter<"Refund"> | string | null
+}
+
+export type RefundCreateWithoutAttemptsInput = {
+  id: string
+  reason: $Enums.RefundReason
+  amountPaise: number
+  razorpayRefundId?: string | null
+  status?: $Enums.RefundStatus
+  requestedAt?: Date | string
+  processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
+  failureReason?: string | null
+  payment: Prisma.PaymentCreateNestedOneWithoutRefundsInput
+}
+
+export type RefundUncheckedCreateWithoutAttemptsInput = {
+  id: string
+  paymentId: string
+  reason: $Enums.RefundReason
+  amountPaise: number
+  razorpayRefundId?: string | null
+  status?: $Enums.RefundStatus
+  requestedAt?: Date | string
+  processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
+  failureReason?: string | null
+}
+
+export type RefundCreateOrConnectWithoutAttemptsInput = {
+  where: Prisma.RefundWhereUniqueInput
+  create: Prisma.XOR<Prisma.RefundCreateWithoutAttemptsInput, Prisma.RefundUncheckedCreateWithoutAttemptsInput>
+}
+
+export type RefundUpsertWithoutAttemptsInput = {
+  update: Prisma.XOR<Prisma.RefundUpdateWithoutAttemptsInput, Prisma.RefundUncheckedUpdateWithoutAttemptsInput>
+  create: Prisma.XOR<Prisma.RefundCreateWithoutAttemptsInput, Prisma.RefundUncheckedCreateWithoutAttemptsInput>
+  where?: Prisma.RefundWhereInput
+}
+
+export type RefundUpdateToOneWithWhereWithoutAttemptsInput = {
+  where?: Prisma.RefundWhereInput
+  data: Prisma.XOR<Prisma.RefundUpdateWithoutAttemptsInput, Prisma.RefundUncheckedUpdateWithoutAttemptsInput>
+}
+
+export type RefundUpdateWithoutAttemptsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  reason?: Prisma.EnumRefundReasonFieldUpdateOperationsInput | $Enums.RefundReason
+  amountPaise?: Prisma.IntFieldUpdateOperationsInput | number
+  razorpayRefundId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
+  requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  payment?: Prisma.PaymentUpdateOneRequiredWithoutRefundsNestedInput
+}
+
+export type RefundUncheckedUpdateWithoutAttemptsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  paymentId?: Prisma.StringFieldUpdateOperationsInput | string
+  reason?: Prisma.EnumRefundReasonFieldUpdateOperationsInput | $Enums.RefundReason
+  amountPaise?: Prisma.IntFieldUpdateOperationsInput | number
+  razorpayRefundId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
+  requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
 export type RefundCreateManyPaymentInput = {
@@ -570,6 +726,8 @@ export type RefundCreateManyPaymentInput = {
   status?: $Enums.RefundStatus
   requestedAt?: Date | string
   processedAt?: Date | string | null
+  processingStartedAt?: Date | string | null
+  attemptNumber?: number
   failureReason?: string | null
 }
 
@@ -581,7 +739,10 @@ export type RefundUpdateWithoutPaymentInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attempts?: Prisma.RefundAttemptUpdateManyWithoutRefundNestedInput
 }
 
 export type RefundUncheckedUpdateWithoutPaymentInput = {
@@ -592,7 +753,10 @@ export type RefundUncheckedUpdateWithoutPaymentInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  attempts?: Prisma.RefundAttemptUncheckedUpdateManyWithoutRefundNestedInput
 }
 
 export type RefundUncheckedUpdateManyWithoutPaymentInput = {
@@ -603,9 +767,40 @@ export type RefundUncheckedUpdateManyWithoutPaymentInput = {
   status?: Prisma.EnumRefundStatusFieldUpdateOperationsInput | $Enums.RefundStatus
   requestedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   processedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  processingStartedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  attemptNumber?: Prisma.IntFieldUpdateOperationsInput | number
   failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
 }
 
+
+/**
+ * Count Type RefundCountOutputType
+ */
+
+export type RefundCountOutputType = {
+  attempts: number
+}
+
+export type RefundCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  attempts?: boolean | RefundCountOutputTypeCountAttemptsArgs
+}
+
+/**
+ * RefundCountOutputType without action
+ */
+export type RefundCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the RefundCountOutputType
+   */
+  select?: Prisma.RefundCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * RefundCountOutputType without action
+ */
+export type RefundCountOutputTypeCountAttemptsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.RefundAttemptWhereInput
+}
 
 
 export type RefundSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -617,8 +812,12 @@ export type RefundSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   status?: boolean
   requestedAt?: boolean
   processedAt?: boolean
+  processingStartedAt?: boolean
+  attemptNumber?: boolean
   failureReason?: boolean
   payment?: boolean | Prisma.PaymentDefaultArgs<ExtArgs>
+  attempts?: boolean | Prisma.Refund$attemptsArgs<ExtArgs>
+  _count?: boolean | Prisma.RefundCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["refund"]>
 
 export type RefundSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -630,6 +829,8 @@ export type RefundSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   status?: boolean
   requestedAt?: boolean
   processedAt?: boolean
+  processingStartedAt?: boolean
+  attemptNumber?: boolean
   failureReason?: boolean
   payment?: boolean | Prisma.PaymentDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["refund"]>
@@ -643,6 +844,8 @@ export type RefundSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   status?: boolean
   requestedAt?: boolean
   processedAt?: boolean
+  processingStartedAt?: boolean
+  attemptNumber?: boolean
   failureReason?: boolean
   payment?: boolean | Prisma.PaymentDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["refund"]>
@@ -656,12 +859,16 @@ export type RefundSelectScalar = {
   status?: boolean
   requestedAt?: boolean
   processedAt?: boolean
+  processingStartedAt?: boolean
+  attemptNumber?: boolean
   failureReason?: boolean
 }
 
-export type RefundOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "paymentId" | "reason" | "amountPaise" | "razorpayRefundId" | "status" | "requestedAt" | "processedAt" | "failureReason", ExtArgs["result"]["refund"]>
+export type RefundOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "paymentId" | "reason" | "amountPaise" | "razorpayRefundId" | "status" | "requestedAt" | "processedAt" | "processingStartedAt" | "attemptNumber" | "failureReason", ExtArgs["result"]["refund"]>
 export type RefundInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   payment?: boolean | Prisma.PaymentDefaultArgs<ExtArgs>
+  attempts?: boolean | Prisma.Refund$attemptsArgs<ExtArgs>
+  _count?: boolean | Prisma.RefundCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type RefundIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   payment?: boolean | Prisma.PaymentDefaultArgs<ExtArgs>
@@ -674,6 +881,7 @@ export type $RefundPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
   name: "Refund"
   objects: {
     payment: Prisma.$PaymentPayload<ExtArgs>
+    attempts: Prisma.$RefundAttemptPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -684,6 +892,8 @@ export type $RefundPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     status: $Enums.RefundStatus
     requestedAt: Date
     processedAt: Date | null
+    processingStartedAt: Date | null
+    attemptNumber: number
     failureReason: string | null
   }, ExtArgs["result"]["refund"]>
   composites: {}
@@ -1080,6 +1290,7 @@ readonly fields: RefundFieldRefs;
 export interface Prisma__RefundClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
   payment<T extends Prisma.PaymentDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.PaymentDefaultArgs<ExtArgs>>): Prisma.Prisma__PaymentClient<runtime.Types.Result.GetResult<Prisma.$PaymentPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+  attempts<T extends Prisma.Refund$attemptsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Refund$attemptsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RefundAttemptPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1117,6 +1328,8 @@ export interface RefundFieldRefs {
   readonly status: Prisma.FieldRef<"Refund", 'RefundStatus'>
   readonly requestedAt: Prisma.FieldRef<"Refund", 'DateTime'>
   readonly processedAt: Prisma.FieldRef<"Refund", 'DateTime'>
+  readonly processingStartedAt: Prisma.FieldRef<"Refund", 'DateTime'>
+  readonly attemptNumber: Prisma.FieldRef<"Refund", 'Int'>
   readonly failureReason: Prisma.FieldRef<"Refund", 'String'>
 }
     
@@ -1516,6 +1729,30 @@ export type RefundDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.Intern
    * Limit how many Refunds to delete.
    */
   limit?: number
+}
+
+/**
+ * Refund.attempts
+ */
+export type Refund$attemptsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the RefundAttempt
+   */
+  select?: Prisma.RefundAttemptSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the RefundAttempt
+   */
+  omit?: Prisma.RefundAttemptOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.RefundAttemptInclude<ExtArgs> | null
+  where?: Prisma.RefundAttemptWhereInput
+  orderBy?: Prisma.RefundAttemptOrderByWithRelationInput | Prisma.RefundAttemptOrderByWithRelationInput[]
+  cursor?: Prisma.RefundAttemptWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.RefundAttemptScalarFieldEnum | Prisma.RefundAttemptScalarFieldEnum[]
 }
 
 /**

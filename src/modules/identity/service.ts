@@ -10,6 +10,7 @@ import {
   type ApplicantPrincipal,
   type MemberPrincipal,
   type Principal,
+  type PrincipalResolution,
   type PrincipalRole,
   type SessionCredentials,
 } from "../../http/auth.js";
@@ -304,7 +305,7 @@ export class IdentityService {
     };
   }
 
-  public async resolve(request: Request): Promise<Principal | null> {
+  public async resolve(request: Request): Promise<PrincipalResolution | null> {
     const credentials = sessionCredentials(request);
     if (credentials === null) return null;
     const session = await this.db.session.findUnique({
@@ -324,14 +325,19 @@ export class IdentityService {
     }
 
     let current = session;
+    let sessionRefreshed = false;
     if (now.getTime() - session.lastSeenAt.getTime() > ONE_HOUR_MS) {
       const expiresAt = addMilliseconds(now, sessionTtlMilliseconds(session.client, this.config));
       current = await this.db.session.update({
         where: { id: session.id },
         data: { lastSeenAt: now, expiresAt },
       });
+      sessionRefreshed = true;
     }
-    return this.principalFromSession(current);
+    return {
+      principal: await this.principalFromSession(current),
+      sessionRefreshed,
+    };
   }
   public async revokeCurrentSession(request: Request): Promise<SessionCredentials> {
     const credentials = sessionCredentials(request);

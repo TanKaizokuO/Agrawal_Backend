@@ -423,6 +423,9 @@ export const ModelName = {
   Flag: 'Flag',
   Payment: 'Payment',
   Refund: 'Refund',
+  RefundAttempt: 'RefundAttempt',
+  PaymentOrderClaim: 'PaymentOrderClaim',
+  PaymentOutboxJob: 'PaymentOutboxJob',
   HeadAnchor: 'HeadAnchor',
   WebhookEvent: 'WebhookEvent',
   Family: 'Family',
@@ -451,7 +454,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "rateLimitBucket" | "idempotencyRecord" | "bloodSosRequest" | "bloodSosAlert" | "bloodSosResponse" | "donorPreference" | "donorAlertDay" | "event" | "eventPass" | "admission" | "gateDevice" | "session" | "memberRole" | "image" | "notice" | "businessListingMeta" | "archivalRequest" | "report" | "suspension" | "deviceToken" | "pushDelivery" | "pushDeliveryToken" | "processingRecord" | "flag" | "payment" | "refund" | "headAnchor" | "webhookEvent" | "family" | "member" | "familyLink" | "consentEvent" | "erasureRequest" | "officerMessage" | "invite" | "pincodeCache" | "registration" | "familyIdCounter" | "romanizationCache"
+    modelProps: "rateLimitBucket" | "idempotencyRecord" | "bloodSosRequest" | "bloodSosAlert" | "bloodSosResponse" | "donorPreference" | "donorAlertDay" | "event" | "eventPass" | "admission" | "gateDevice" | "session" | "memberRole" | "image" | "notice" | "businessListingMeta" | "archivalRequest" | "report" | "suspension" | "deviceToken" | "pushDelivery" | "pushDeliveryToken" | "processingRecord" | "flag" | "payment" | "refund" | "refundAttempt" | "paymentOrderClaim" | "paymentOutboxJob" | "headAnchor" | "webhookEvent" | "family" | "member" | "familyLink" | "consentEvent" | "erasureRequest" | "officerMessage" | "invite" | "pincodeCache" | "registration" | "familyIdCounter" | "romanizationCache"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -2379,6 +2382,228 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    RefundAttempt: {
+      payload: Prisma.$RefundAttemptPayload<ExtArgs>
+      fields: Prisma.RefundAttemptFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.RefundAttemptFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.RefundAttemptFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>
+        }
+        findFirst: {
+          args: Prisma.RefundAttemptFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.RefundAttemptFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>
+        }
+        findMany: {
+          args: Prisma.RefundAttemptFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>[]
+        }
+        create: {
+          args: Prisma.RefundAttemptCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>
+        }
+        createMany: {
+          args: Prisma.RefundAttemptCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.RefundAttemptCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>[]
+        }
+        delete: {
+          args: Prisma.RefundAttemptDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>
+        }
+        update: {
+          args: Prisma.RefundAttemptUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>
+        }
+        deleteMany: {
+          args: Prisma.RefundAttemptDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.RefundAttemptUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.RefundAttemptUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>[]
+        }
+        upsert: {
+          args: Prisma.RefundAttemptUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RefundAttemptPayload>
+        }
+        aggregate: {
+          args: Prisma.RefundAttemptAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateRefundAttempt>
+        }
+        groupBy: {
+          args: Prisma.RefundAttemptGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RefundAttemptGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.RefundAttemptCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RefundAttemptCountAggregateOutputType> | number
+        }
+      }
+    }
+    PaymentOrderClaim: {
+      payload: Prisma.$PaymentOrderClaimPayload<ExtArgs>
+      fields: Prisma.PaymentOrderClaimFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.PaymentOrderClaimFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.PaymentOrderClaimFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>
+        }
+        findFirst: {
+          args: Prisma.PaymentOrderClaimFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.PaymentOrderClaimFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>
+        }
+        findMany: {
+          args: Prisma.PaymentOrderClaimFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>[]
+        }
+        create: {
+          args: Prisma.PaymentOrderClaimCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>
+        }
+        createMany: {
+          args: Prisma.PaymentOrderClaimCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.PaymentOrderClaimCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>[]
+        }
+        delete: {
+          args: Prisma.PaymentOrderClaimDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>
+        }
+        update: {
+          args: Prisma.PaymentOrderClaimUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>
+        }
+        deleteMany: {
+          args: Prisma.PaymentOrderClaimDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.PaymentOrderClaimUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.PaymentOrderClaimUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>[]
+        }
+        upsert: {
+          args: Prisma.PaymentOrderClaimUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOrderClaimPayload>
+        }
+        aggregate: {
+          args: Prisma.PaymentOrderClaimAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregatePaymentOrderClaim>
+        }
+        groupBy: {
+          args: Prisma.PaymentOrderClaimGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PaymentOrderClaimGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.PaymentOrderClaimCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PaymentOrderClaimCountAggregateOutputType> | number
+        }
+      }
+    }
+    PaymentOutboxJob: {
+      payload: Prisma.$PaymentOutboxJobPayload<ExtArgs>
+      fields: Prisma.PaymentOutboxJobFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.PaymentOutboxJobFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.PaymentOutboxJobFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>
+        }
+        findFirst: {
+          args: Prisma.PaymentOutboxJobFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.PaymentOutboxJobFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>
+        }
+        findMany: {
+          args: Prisma.PaymentOutboxJobFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>[]
+        }
+        create: {
+          args: Prisma.PaymentOutboxJobCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>
+        }
+        createMany: {
+          args: Prisma.PaymentOutboxJobCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.PaymentOutboxJobCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>[]
+        }
+        delete: {
+          args: Prisma.PaymentOutboxJobDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>
+        }
+        update: {
+          args: Prisma.PaymentOutboxJobUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>
+        }
+        deleteMany: {
+          args: Prisma.PaymentOutboxJobDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.PaymentOutboxJobUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.PaymentOutboxJobUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>[]
+        }
+        upsert: {
+          args: Prisma.PaymentOutboxJobUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PaymentOutboxJobPayload>
+        }
+        aggregate: {
+          args: Prisma.PaymentOutboxJobAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregatePaymentOutboxJob>
+        }
+        groupBy: {
+          args: Prisma.PaymentOutboxJobGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PaymentOutboxJobGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.PaymentOutboxJobCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PaymentOutboxJobCountAggregateOutputType> | number
+        }
+      }
+    }
     HeadAnchor: {
       payload: Prisma.$HeadAnchorPayload<ExtArgs>
       fields: Prisma.HeadAnchorFieldRefs
@@ -3397,6 +3622,7 @@ export const IdempotencyRecordScalarFieldEnum = {
   requestHash: 'requestHash',
   responseStatus: 'responseStatus',
   responseBody: 'responseBody',
+  responseHeaders: 'responseHeaders',
   createdAt: 'createdAt'
 } as const
 
@@ -3773,10 +3999,46 @@ export const RefundScalarFieldEnum = {
   status: 'status',
   requestedAt: 'requestedAt',
   processedAt: 'processedAt',
+  processingStartedAt: 'processingStartedAt',
+  attemptNumber: 'attemptNumber',
   failureReason: 'failureReason'
 } as const
 
 export type RefundScalarFieldEnum = (typeof RefundScalarFieldEnum)[keyof typeof RefundScalarFieldEnum]
+
+
+export const RefundAttemptScalarFieldEnum = {
+  refundId: 'refundId',
+  attemptNumber: 'attemptNumber',
+  razorpayRefundId: 'razorpayRefundId',
+  createdAt: 'createdAt'
+} as const
+
+export type RefundAttemptScalarFieldEnum = (typeof RefundAttemptScalarFieldEnum)[keyof typeof RefundAttemptScalarFieldEnum]
+
+
+export const PaymentOrderClaimScalarFieldEnum = {
+  purpose: 'purpose',
+  subjectId: 'subjectId',
+  paymentId: 'paymentId',
+  amountPaise: 'amountPaise',
+  attemptedAt: 'attemptedAt'
+} as const
+
+export type PaymentOrderClaimScalarFieldEnum = (typeof PaymentOrderClaimScalarFieldEnum)[keyof typeof PaymentOrderClaimScalarFieldEnum]
+
+
+export const PaymentOutboxJobScalarFieldEnum = {
+  id: 'id',
+  eventKey: 'eventKey',
+  jobName: 'jobName',
+  payload: 'payload',
+  createdAt: 'createdAt',
+  claimedAt: 'claimedAt',
+  dispatchedAt: 'dispatchedAt'
+} as const
+
+export type PaymentOutboxJobScalarFieldEnum = (typeof PaymentOutboxJobScalarFieldEnum)[keyof typeof PaymentOutboxJobScalarFieldEnum]
 
 
 export const HeadAnchorScalarFieldEnum = {
@@ -3972,19 +4234,19 @@ export const SortOrder = {
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
-export const JsonNullValueInput = {
-  JsonNull: JsonNull
-} as const
-
-export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
-
-
 export const NullableJsonNullValueInput = {
   DbNull: DbNull,
   JsonNull: JsonNull
 } as const
 
 export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
+
+
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
 
 
 export const QueryMode = {
@@ -4691,6 +4953,9 @@ export type GlobalOmitConfig = {
   flag?: Prisma.FlagOmit
   payment?: Prisma.PaymentOmit
   refund?: Prisma.RefundOmit
+  refundAttempt?: Prisma.RefundAttemptOmit
+  paymentOrderClaim?: Prisma.PaymentOrderClaimOmit
+  paymentOutboxJob?: Prisma.PaymentOutboxJobOmit
   headAnchor?: Prisma.HeadAnchorOmit
   webhookEvent?: Prisma.WebhookEventOmit
   family?: Prisma.FamilyOmit

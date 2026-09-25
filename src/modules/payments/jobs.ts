@@ -1,6 +1,9 @@
 import type { WorkerRegistration } from "../../jobs.js";
 import type { PaymentService } from "./service.js";
 import { isRecord } from "./guards.js";
+import type { PaymentWebhookService } from "./webhooks.js";
+
+export const PAYMENT_JOB_RETRY_OPTIONS = { retryLimit: 5, retryBackoff: true } as const;
 
 export const JOB_NAMES = {
   applyWebhook: "payments.applyWebhook",
@@ -27,12 +30,15 @@ function requiredId(payload: unknown, field: "eventId" | "refundId"): string {
   return value;
 }
 
-export function createPaymentWorkers(service: PaymentService): readonly WorkerRegistration[] {
+export function createPaymentWorkers(
+  service: PaymentService,
+  webhookService: PaymentWebhookService,
+): readonly WorkerRegistration[] {
   return [
     {
       name: JOB_NAMES.applyWebhook,
       handler: async (payload: unknown) => {
-        await service.applyWebhook(requiredId(payload, "eventId"));
+        await webhookService.applyWebhook(requiredId(payload, "eventId"));
       },
     },
     {

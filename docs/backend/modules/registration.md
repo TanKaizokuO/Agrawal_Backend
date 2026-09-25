@@ -7,11 +7,11 @@ Read `CONTEXT.md` → Applicant, Registration, Registration Payment, Payment Ide
 ## Lifecycle
 
 ```
-            sign-in (new phone)
+            sign-in (no live Registration)
                   │
-               STARTED ──────────────┐ idle 24h / re-sign-in / cancel
-                  │ payment captured  │
-                 PAID ───────────────┤──► ABANDONED  (refund if PAID)
+               STARTED ──────────────┐ idle 24h / cancel
+                  │ payment captured │
+                 PAID ───────────────┤──► ABANDONED  (refund if paid)
        ┌──────────┴──────────┐        │
  submit FOUND            submit JOIN  │
        │                     │        │
@@ -26,7 +26,7 @@ Read `CONTEXT.md` → Applicant, Registration, Registration Payment, Payment Ide
 
 - A Registration **completes** only in `COMPLETED`. The Applicant becomes a Member in that same transaction and not before (`CONTEXT.md`, Registration).
 - Every non-completing end state — `ABANDONED`, `CANCELLED`, `DECLINED`, `EXPIRED` — refunds a captured Registration Payment and purges the Applicant's submitted profile and uploaded images. Only the Payment and its Refund remain (statutory records).
-- An abandoned Registration is never resumed. A fresh sign-in starts a fresh one.
+- A sign-in reuses an existing `STARTED`, `PAID` or `AWAITING_HEAD` Registration and refreshes `lastActivityAt`. An abandoned Registration is never resumed; a fresh sign-in starts a new Registration when none is live.
 
 ## Routes (the three family choices)
 
@@ -90,8 +90,8 @@ CREATE UNIQUE INDEX registration_one_live_per_phone
 
 Identity calls `registration.openForPhone(tx, phone)` when a phone with no Member signs in:
 
-1. If an `AWAITING_HEAD` Registration exists → return it. The Applicant sees its status and may cancel it; they cannot start another while it waits.
-2. If a `STARTED` or `PAID` Registration exists → end it as `ABANDONED` (`endReason: "RESIGNED_IN"`, refund if paid), then create a fresh `STARTED` one.
+1. If an `AWAITING_HEAD` Registration exists → return it and touch `lastActivityAt`. The Applicant sees its status and may cancel it; they cannot start another while it waits.
+2. If a `STARTED` or `PAID` Registration exists → return the same Registration and touch `lastActivityAt`; do not abandon or refund it.
 3. Else create a fresh `STARTED` Registration.
 
 ## The Registration Payment
@@ -100,6 +100,7 @@ Identity calls `registration.openForPhone(tx, phone)` when a phone with no Membe
 - Worker `payments.captured.REGISTRATION`:
   - Registration in `STARTED` → set `PAID`, `paymentId`, touch `lastActivityAt`.
   - Registration in any other state (it was abandoned while the payment was in flight) → `payments.refund(REGISTRATION_ABANDONED)`.
+- Worker `payments.refunded.REGISTRATION` marks the processed refund's Payment consumed. Registration state is unchanged; this stops reconciliation from replaying that Payment's captured event.
 - Every adult pays — founders and joiners alike (`CONTEXT.md`, Registration Payment). This resolves spec conflict R1.
 
 ## Founding (`route: INDIVIDUAL | CREATE`)
@@ -272,8 +273,10 @@ openForPhone(tx, phoneE164: string): Promise<{ registrationId: string }>
 - Joiner with `gotra` → `GOTRA_NOT_ALLOWED_FOR_JOIN`; approved joiner's Gotra equals the Family's.
 - Decline → `DECLINED`, one refund, profile purged, images deleted.
 - Expiry at 14 days (fake clock) → `EXPIRED`, one refund.
-- Re-sign-in with a `PAID` Registration → old one `ABANDONED` and refunded, new one `STARTED`.
+- Re-sign-in with a `STARTED` Registration → the same Registration remains `STARTED` and its activity is refreshed.
+- Re-sign-in with a `PAID` Registration → the same Registration remains `PAID`, its activity is refreshed, and the idle-abandon job does not refund it.
 - Re-sign-in with an `AWAITING_HEAD` Registration → the same Registration returned.
+- Sign-in after a `STARTED` Registration was cancelled → a fresh Registration starts; the cancelled Registration is not resumed.
 - A payment captured after its Registration was abandoned → refunded.
 - Joiner paying from another Family's Head's VPA → flag raised, join proceeds.
 - invariant 21: Hindi-typed name without confirmation → `nameHi` set, `nameEn` null, `nameEnSearchKey` set.

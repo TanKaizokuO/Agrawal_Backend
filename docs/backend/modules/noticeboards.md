@@ -135,7 +135,7 @@ All values live in config, never as literals in code.
 
 ### Daily posting cap (invariant — no number in CONTEXT.md)
 
-A Member's Notice count for today's IST calendar day (`clock.todayIst()`) across all boards. If `≥ POSTING_CAP_PER_DAY` → `429 POSTING_CAP_REACHED`. Blood SOS is exempt (different module).
+A Member's Notice count for today's IST calendar day (`clock.todayIst()`) across all boards. If `≥ POSTING_CAP_PER_DAY` → `429 POSTING_CAP_REACHED`. Blood SOS is exempt (different module). The service locks the Member row, checks the count and creates the Notice in the same transaction, so concurrent posts cannot exceed the cap.
 
 ### Automated text check
 
@@ -153,7 +153,7 @@ Before publishing any Notice, check the combined text (`title + bodyEn + bodyHi`
 3. Count distinct `reporterFamilyId` on this Notice where `reporterFamilyId ≠ authorFamilyId`. If `≥ REPORTS_THRESHOLD`:
    - Notice → `HIDDEN`, `hiddenAt`, `hiddenReason = REPORTS`.
    - Create `Suspension` for the author: `endsAt = now + SUSPENSION_DURATION_DAYS`.
-   - `notifications.send([authorMemberId], { topic: NOTICE_HIDDEN, … })` and `notifications.send([authorMemberId], { topic: SUSPENSION, … })` — the suspension is never silent (invariant 14).
+   - After commit, launch the independent `NOTICE_HIDDEN` and `SUSPENSION` notifications concurrently (at most two sends). Wait for both to settle, then propagate a send failure; the Notice hide and Suspension remain committed.
 
 A suspended Member's existing Notices stay visible (they were already posted); the suspension blocks new posts: `POST /v1/notices` checks for an active `Suspension` and returns `403 POSTING_SUSPENDED` with `endsAt`.
 
@@ -167,12 +167,14 @@ A Shok Sandesh has **no contact-phone field**, and its text goes through the sam
 
 If `linkedMemberId` is supplied and that Member is ACTIVE:
 - Open an `ArchivalRequest` for the deceased.
-- `notifications.send(adultMembersOfFamily(familyId, exceptMemberId: authorMemberId), { topic: ARCHIVAL_REQUEST, … })`. The linked Member is among the recipients. If they are alive, they are the person best placed to refute.
+- After the Notice and Archival Request commit, send `notifications.send(adultMembersOfFamily(familyId, exceptMemberId: authorMemberId), { topic: ARCHIVAL_REQUEST, … })`. The linked Member is among the recipients. If they are alive, they are the person best placed to refute.
 - The Archival Request is **not** confirmation of death; it is the question.
 
 If `linkedMemberId` is null → no Archival Request is opened; the Shok Sandesh is purely an announcement (CONTEXT.md, Archival Request).
 
 A Shok Sandesh may optionally carry an image (`SHOK_SANDESH_PHOTO` purpose via Media). A Business Listing photo is `BUSINESS_PHOTO`. Both follow `media.md`: until screening is on, the image is shown to its uploader only and every other reader gets `imageUrl: null` (invariant 11). Notices must not bypass Media's visibility check to show a photo to the board.
+
+When Media removes an attached `SHOK_SANDESH_PHOTO` or `BUSINESS_PHOTO`, Noticeboards clears matching `Notice.imageId` references through its `onImageRemoved` handler in the same transaction. A handler failure propagates and prevents the image removal from committing.
 
 ### Archival Request confirmation
 
@@ -200,6 +202,7 @@ If `BUSINESS_LISTING_FEE_PAISE` is unset, the board doesn't open. Every Business
    - Notice `DRAFT` → `ACTIVE`, `publishedAt = now`, `expiresAt = now + BUSINESS_LISTING_DURATION_DAYS`.
    - Payment → consumed.
    - Notice in any other state (abandoned) → `payments.refund(PUBLICATION_FAILED)`.
+4. After a refund is processed, `payments.refunded.BUSINESS_LISTING` marks the Payment consumed so reconciliation does not replay its captured event.
 
 **Renewal:**
 
@@ -282,6 +285,7 @@ const BusinessListingBody = z.object({
 | `noticeboards.endSuspensions` | every 15 min | Suspensions past `endsAt` without `liftedAt` → set `liftedAt = endsAt`, `liftedReason = EXPIRED` |
 | `noticeboards.escalateArchivals` | hourly | OPEN Archival Requests past `expiresAt` → `ESCALATED` |
 | `payments.captured.BUSINESS_LISTING` | from Payments | Publish the listing (see Business Listing flow) |
+| `payments.refunded.BUSINESS_LISTING` | after a processed refund | Mark the Payment consumed and stop captured-event recovery |
 
 ## Rate limits
 
@@ -297,6 +301,7 @@ const BusinessListingBody = z.object({
 onMemberErased(handler): void     // registered with register.onMemberErased at boot
 activeSuspension(memberId: string): Promise<Suspension | null>
 archivalRequestsForMember(memberId: string): Promise<ArchivalRequest[]>
+handleImageRemoved(tx, imageId): Promise<void> // detach matching Notice.imageId references
 ```
 
 ## Required tests
@@ -317,6 +322,7 @@ archivalRequestsForMember(memberId: string): Promise<ArchivalRequest[]>
 - Blood SOS report (targetType BLOOD_SOS): no auto-hiding, no suspension; appears in Officer queue.
 - invariant 16: `ShokSandeshBody` has no phone field; a `contactPhone` key in the body is rejected by the strict schema.
 - invariant 11: with screening off, a Shok Sandesh or Business Listing photo has a URL for its author and `null` for every other Member.
+- Media image removal clears only matching Shok Sandesh and Business Listing image references.
 - invariant 12: with `BUSINESS_LISTING_FEE_PAISE` unset, `POST /v1/business-listings` → `503 BOARD_NOT_OPEN`.
 - Archival Request: the linked Member refutes their own Archival Request → `REFUTED`; they cannot confirm it (`403`). After a `REFUTED` request, a new linked Shok Sandesh can open a fresh one.
 

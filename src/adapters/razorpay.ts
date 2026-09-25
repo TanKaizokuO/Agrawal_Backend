@@ -22,6 +22,42 @@ function requiredString(value: unknown, field: string): string {
   if (result === null) throw new Error(`Razorpay response missing ${field}`);
   return result;
 }
+function providerOrder(value: unknown): PaymentOrder {
+  const entity = isRecord(value) ? value : null;
+  if (entity === null) throw new Error("Razorpay order response was not an object");
+
+  const amount = amountPaise(entity.amount);
+  const currency = stringValue(entity.currency);
+  if (amount === null || currency !== "INR") {
+    throw new Error("Razorpay order response had invalid amount or currency");
+  }
+  return {
+    providerOrderId: requiredString(entity.id, "order id"),
+    amountPaise: amount,
+    currency: "INR",
+  };
+}
+
+function providerRefund(value: unknown): PaymentRefund {
+  const refund = isRecord(value) ? value : null;
+  if (refund === null) throw new Error("Razorpay refund response was not an object");
+  return {
+    providerRefundId: requiredString(refund.id, "refund id"),
+    status: requiredString(refund.status, "refund status"),
+  };
+}
+
+interface RazorpayRequestApi {
+  getEntityUrl(input: { readonly url: string }): string;
+  rq: {
+    post(
+      url: string,
+      data: unknown,
+      options: { readonly headers: Readonly<Record<string, string>> },
+    ): Promise<{ readonly data: unknown }>;
+  };
+}
+
 
 function payment(value: unknown): PaymentProviderPayment {
   const entity = isRecord(value) ? value : null;
@@ -68,19 +104,43 @@ export class RazorpayPaymentGateway implements PaymentGateway {
       receipt: input.receipt,
       notes: { ...input.notes },
     });
-    const created = isRecord(response) ? response : null;
-    if (created === null) throw new Error("Razorpay order response was not an object");
+    return providerOrder(response);
+  }
 
-    const amount = amountPaise(created.amount);
-    const currency = stringValue(created.currency);
-    if (amount === null || currency !== "INR") {
-      throw new Error("Razorpay order response had invalid amount or currency");
+  async findOrderByReceipt(receipt: string): Promise<PaymentOrder | null> {
+    const response: unknown = await this.client.orders.all({ receipt, count: 100 });
+    const body = isRecord(response) ? response : null;
+    if (body === null || !Array.isArray(body.items)) {
+      throw new Error("Razorpay orders response was invalid");
     }
-    return {
-      providerOrderId: requiredString(created.id, "order id"),
-      amountPaise: amount,
-      currency: "INR",
-    };
+    const found: unknown = body.items.find((item) => isRecord(item) && item.receipt === receipt);
+    return found === undefined ? null : providerOrder(found);
+  }
+
+  async refund(input: {
+    readonly providerPaymentId: string;
+    readonly amountPaise: number;
+    readonly speed: "normal";
+    readonly notes: Readonly<Record<string, string>>;
+    readonly idempotencyKey: string;
+  }): Promise<PaymentRefund> {
+    // The pinned Razorpay SDK does not expose per-request headers on refunds.
+    // Use its authenticated Axios transport without mutating shared defaults.
+    const api = this.client.api as unknown as RazorpayRequestApi;
+    const response = await api.rq.post(
+      api.getEntityUrl({ url: `/payments/${input.providerPaymentId}/refund` }),
+      {
+        amount: input.amountPaise,
+        speed: input.speed,
+        notes: { ...input.notes },
+      },
+      { headers: { "X-Refund-Idempotency": input.idempotencyKey } },
+    );
+    return providerRefund(response.data);
+  }
+
+  async fetchRefund(providerRefundId: string): Promise<PaymentRefund> {
+    return providerRefund(await this.client.refunds.fetch(providerRefundId));
   }
 
   async fetchPayment(providerPaymentId: string): Promise<PaymentProviderPayment> {
@@ -109,24 +169,6 @@ export class RazorpayPaymentGateway implements PaymentGateway {
     return payment(response);
   }
 
-  async refund(input: {
-    readonly providerPaymentId: string;
-    readonly amountPaise: number;
-    readonly speed: "normal";
-    readonly notes: Readonly<Record<string, string>>;
-  }): Promise<PaymentRefund> {
-    const response: unknown = await this.client.payments.refund(input.providerPaymentId, {
-      amount: input.amountPaise,
-      speed: input.speed,
-      notes: { ...input.notes },
-    });
-    const refund = isRecord(response) ? response : null;
-    if (refund === null) throw new Error("Razorpay refund response was not an object");
-    return {
-      providerRefundId: requiredString(refund.id, "refund id"),
-      status: requiredString(refund.status, "refund status"),
-    };
-  }
 }
 
 export function createRazorpayGateway(options: RazorpayGatewayOptions): PaymentGateway {

@@ -1,4 +1,4 @@
-import type { Request, RequestHandler } from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { AppError } from "./errors.js";
 
 export type PrincipalKind = "APPLICANT" | "MEMBER";
@@ -20,11 +20,16 @@ export interface MemberPrincipal {
   readonly roles: readonly PrincipalRole[];
   readonly isHead: boolean;
 }
-
 export type Principal = ApplicantPrincipal | MemberPrincipal;
 
+export interface PrincipalResolution {
+  readonly principal: Principal;
+  readonly sessionRefreshed: boolean;
+}
+
 export interface PrincipalResolver {
-  resolve(request: Request): Promise<Principal | null>;
+  resolve(request: Request): Promise<PrincipalResolution | null>;
+  sessionTtlSeconds(client: "WEB"): number;
 }
 
 export interface SessionCredentials {
@@ -82,17 +87,45 @@ declare module "express-serve-static-core" {
   }
 }
 
+export function sessionCookie(token: string, maxAgeSeconds: number): string {
+  return `sid=${token}; Max-Age=${String(maxAgeSeconds)}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+}
+
+export function expiredSessionCookie(): string {
+  return "sid=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax";
+}
+
 export function authenticate(resolver?: PrincipalResolver): RequestHandler {
-  return async (request, _response, next) => {
+  return async (request, response: Response, next) => {
+    let credentials: SessionCredentials | null = null;
     try {
-      const credentials = sessionCredentials(request);
+      credentials = sessionCredentials(request);
       if (credentials === null || resolver === undefined) {
         request.principal = null;
       } else {
-        request.principal = await resolver.resolve(request);
+        const resolution = await resolver.resolve(request);
+        request.principal = resolution?.principal ?? null;
+        if (credentials.source === "COOKIE") {
+          if (resolution === null) {
+            response.setHeader("Set-Cookie", expiredSessionCookie());
+          } else if (resolution.sessionRefreshed) {
+            response.setHeader(
+              "Set-Cookie",
+              sessionCookie(credentials.token, resolver.sessionTtlSeconds("WEB")),
+            );
+          }
+        }
       }
       next();
     } catch (error) {
+      if (error instanceof AppError && error.code === "SESSION_EXPIRED") {
+        request.principal = null;
+        if (credentials?.source === "COOKIE") {
+          response.setHeader("Set-Cookie", expiredSessionCookie());
+        }
+        next();
+        return;
+      }
       next(error);
     }
   };

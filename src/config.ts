@@ -70,18 +70,14 @@ const paymentIdentityHmacKey = requiredText.superRefine((value, context) => {
 });
 
 export const configSchema = z.object({
-  nodeEnv: z.enum(["development", "test", "production"]).default("production"),
+  nodeEnv: z.enum(["development", "test", "production"]),
   appEnv: z.enum(["local", "staging", "production"]),
   port: positiveInteger.default(3000),
   databaseUrl: requiredText,
   databaseMigrationUrl: requiredText,
-  webOrigins: z
-    .preprocess(
-      (value) =>
-        value === undefined ? "https://register.example.in" : value,
-      z.string().min(1),
-    )
-    .transform((value) => value.split(",").map((origin) => origin.trim()).filter(Boolean)),
+  webOrigins: requiredText
+    .transform((value) => value.split(",").map((origin) => origin.trim()).filter(Boolean))
+    .pipe(z.array(z.string()).min(1, "must include at least one origin")),
   sessionTtlWebDays: positiveInteger.default(30),
   sessionTtlMobileDays: positiveInteger.default(90),
   firebaseProjectId: requiredText,
@@ -92,6 +88,10 @@ export const configSchema = z.object({
   registrationPaymentPaise: positiveInteger.default(100),
   businessListingFeePaise: positiveInteger.default(4900),
   paymentIdentityHmacKey,
+  paymentOrderClaimLeaseSeconds: positiveInteger.default(300),
+  paymentRefundClaimLeaseSeconds: positiveInteger.default(3600),
+  paymentOutboxClaimLeaseSeconds: positiveInteger.default(300),
+  paymentOutboxJobDedupSeconds: positiveInteger.default(3600),
   s3Bucket: requiredText,
   awsRegion: requiredText.default("ap-south-1"),
   mediaUrlTtlSeconds: positiveInteger.default(3600),
@@ -161,6 +161,10 @@ const ENV_NAME_BY_FIELD: Record<keyof typeof configSchema.shape, string> = {
   registrationPaymentPaise: "REGISTRATION_PAYMENT_PAISE",
   businessListingFeePaise: "BUSINESS_LISTING_FEE_PAISE",
   paymentIdentityHmacKey: "PAYMENT_IDENTITY_HMAC_KEY",
+  paymentOrderClaimLeaseSeconds: "PAYMENT_ORDER_CLAIM_LEASE_SECONDS",
+  paymentRefundClaimLeaseSeconds: "PAYMENT_REFUND_CLAIM_LEASE_SECONDS",
+  paymentOutboxClaimLeaseSeconds: "PAYMENT_OUTBOX_CLAIM_LEASE_SECONDS",
+  paymentOutboxJobDedupSeconds: "PAYMENT_OUTBOX_JOB_DEDUP_SECONDS",
   s3Bucket: "S3_BUCKET",
   awsRegion: "AWS_REGION",
   mediaUrlTtlSeconds: "MEDIA_URL_TTL_SECONDS",

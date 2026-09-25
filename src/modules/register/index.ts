@@ -8,7 +8,6 @@ export {
   RegisterService,
   type CreateFamilyInput,
   type CreateMemberInput,
-  type MediaPort,
   type NomineeReadAuthorizer,
   type PaymentsPort,
   type ProcessingActor,

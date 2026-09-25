@@ -3,11 +3,17 @@ import type { WorkerRegistration } from "../../jobs.js";
 import { PaymentCapturedPayload, paymentCapturedJobName } from "../payments/index.js";
 import type { RegistrationService } from "./service.js";
 
+const PaymentRefundedPayload = z.object({
+  paymentId: z.string().min(1),
+  subjectId: z.uuid(),
+});
+
 export const JOB_NAMES = {
   expireJoinRequest: "registration.expireJoinRequest",
   expireJoinRequests: "registration.expireJoinRequests",
   abandonIdle: "registration.abandonIdle",
   paymentCaptured: paymentCapturedJobName("REGISTRATION"),
+  paymentRefunded: "payments.refunded.REGISTRATION",
 } as const;
 
 export const JOB_SCHEDULES = {
@@ -53,6 +59,13 @@ export function createRegistrationWorkers(service: RegistrationService): readonl
       handler: async (payload: unknown) => {
         const { paymentId, subjectId } = PaymentCapturedPayload.parse(payload);
         await service.onRegistrationPaymentCaptured(paymentId, subjectId);
+      },
+    },
+    {
+      name: JOB_NAMES.paymentRefunded,
+      handler: async (payload: unknown) => {
+        const { paymentId } = PaymentRefundedPayload.parse(payload);
+        await service.onRegistrationPaymentRefunded(paymentId);
       },
     },
   ];

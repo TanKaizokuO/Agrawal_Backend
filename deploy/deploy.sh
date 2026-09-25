@@ -51,20 +51,15 @@ echo "======================================================================"
 # 1. Fetch SSM Parameters and assemble .env.<env>
 # ------------------------------------------------------------------------------
 echo "Fetching parameters from AWS SSM Parameter Store (/agrawal/${ENV}/)..."
-SSM_PARAMS=$(aws ssm get-parameters-by-path \
-  --path "/agrawal/${ENV}/" \
-  --with-decryption \
-  --recursive \
-  --region "${AWS_REGION}" \
-  --query "Parameters[*].[Name,Value]" \
-  --output text)
 
-if [[ -z "${SSM_PARAMS}" ]]; then
-  echo "CRITICAL ERROR: No parameters retrieved from AWS SSM Parameter Store for path /agrawal/${ENV}/. Aborting deployment." >&2
-  exit 1
-fi
+TMP_ENV=""
+cleanup_tmp_env() {
+  if [[ -n "${TMP_ENV}" && -f "${TMP_ENV}" ]]; then
+    rm -f -- "${TMP_ENV}"
+  fi
+}
+trap cleanup_tmp_env EXIT
 
-# Write to temporary file first with restricted permissions
 TMP_ENV=$(mktemp)
 chmod 600 "${TMP_ENV}"
 
@@ -76,14 +71,18 @@ APP_ENV=${ENV}
 PORT=3000
 EOF
 
-while IFS=$'\t' read -r param_name param_val; do
-  if [[ -n "${param_name}" && -n "${param_val}" ]]; then
-    # Strip /agrawal/<env>/ prefix
-    var_name="${param_name#/agrawal/${ENV}/}"
-    # Format into ENV file
-    printf '%s="%s"\n' "${var_name}" "${param_val}" >> "${TMP_ENV}"
-  fi
-done <<< "${SSM_PARAMS}"
+if ! aws ssm get-parameters-by-path \
+  --path "/agrawal/${ENV}/" \
+  --with-decryption \
+  --recursive \
+  --region "${AWS_REGION}" \
+  --query "Parameters[*].[Name,Value]" \
+  --output json |
+  python3 "${SCRIPT_DIR}/serialize-ssm-env.py" "${ENV}" >> "${TMP_ENV}"; then
+  echo "CRITICAL ERROR: Failed to retrieve or serialize AWS SSM parameters. Aborting deployment." >&2
+  exit 1
+fi
+
 mv "${TMP_ENV}" "${ENV_FILE}"
 chmod 600 "${ENV_FILE}"
 echo "Environment file ${ENV_FILE} written successfully."
@@ -99,11 +98,10 @@ docker pull "${IMAGE_URI}"
 # ------------------------------------------------------------------------------
 echo "Executing database migration check..."
 # A failed migration must abort the deployment before restarting the container
-if ! docker run --rm \
-    --name "agrawal-migration-${ENV}-$$" \
-    --env-file "${ENV_FILE}" \
-    "${IMAGE_URI}" \
-    npx prisma migrate deploy --schema prisma/schema --config prisma.config.ts; then
+if ! IMAGE_URI="${IMAGE_URI}" docker compose \
+    --profile migration \
+    -f "${COMPOSE_FILE}" \
+    run --rm --no-deps "migration-${ENV}"; then
   echo "CRITICAL ERROR: 'prisma migrate deploy' failed! Aborting deployment." >&2
   exit 1
 fi

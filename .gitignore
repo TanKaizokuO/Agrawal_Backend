@@ -11,6 +11,11 @@ build/
 .env.*
 env.json
 !.env.example
+/env
+
+# Local credentials / operational notes
+/DUMMAY_ACCOUNT.md
+/POSTGRES_CONNECT.md
 
 # Agent / Tooling
 .venv/
@@ -41,3 +46,12 @@ coverage/
 
 # Firebase service account keys
 *firebase-adminsdk*.json
+
+# Private keys and certificates
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+!/global-bundle.pem

@@ -39,6 +39,7 @@ enum RefundReason {
 
 enum RefundStatus {
   REQUESTED
+  PROCESSING
   PROCESSED
   FAILED
 
@@ -72,25 +73,72 @@ model Payment {
   @@index([subjectId], map: "payment_subject_id_idx")
   @@index([identityHash], map: "payment_identity_hash_idx")
   @@index([status, createdAt], map: "payment_status_created_at_idx")
+  @@index([status, consumedAt], map: "payment_status_consumed_idx")
   @@map("payment")
   @@schema("public")
 }
 
 model Refund {
-  id               String       @id
-  paymentId        String       @map("payment_id")
-  payment          Payment      @relation(fields: [paymentId], references: [id])
-  reason           RefundReason
-  amountPaise      Int          @map("amount_paise")
-  razorpayRefundId String?      @unique @map("razorpay_refund_id")
-  status           RefundStatus @default(REQUESTED)
-  requestedAt      DateTime     @default(now()) @map("requested_at") @db.Timestamptz(6)
-  processedAt      DateTime?    @map("processed_at") @db.Timestamptz(6)
-  failureReason    String?      @map("failure_reason")
+  id                  String          @id
+  paymentId           String          @map("payment_id")
+  payment             Payment         @relation(fields: [paymentId], references: [id])
+  reason              RefundReason
+  amountPaise         Int             @map("amount_paise")
+  razorpayRefundId    String?         @unique @map("razorpay_refund_id")
+  status              RefundStatus    @default(REQUESTED)
+  requestedAt         DateTime        @default(now()) @map("requested_at") @db.Timestamptz(6)
+  processedAt         DateTime?       @map("processed_at") @db.Timestamptz(6)
+  processingStartedAt DateTime?       @map("processing_started_at") @db.Timestamptz(6)
+  attemptNumber       Int             @default(0) @map("attempt_number")
+  failureReason       String?         @map("failure_reason")
+  attempts            RefundAttempt[]
 
   @@unique([paymentId], map: "refund_payment_id_unique")
   @@index([status, requestedAt], map: "refund_status_requested_at_idx")
+  @@index([status, processingStartedAt], map: "refund_status_processing_started_idx")
   @@map("refund")
+  @@schema("public")
+}
+
+/// One logical refund attempt; its provider ID is retained when later retries begin.
+model RefundAttempt {
+  refundId        String   @map("refund_id")
+  refund          Refund   @relation(fields: [refundId], references: [id])
+  attemptNumber   Int      @map("attempt_number")
+  razorpayRefundId String? @unique @map("razorpay_refund_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([refundId, attemptNumber], map: "refund_attempt_pkey")
+  @@map("refund_attempt")
+  @@schema("public")
+}
+
+/// A leased order-creation reservation; its payment ID is the provider receipt for recovery.
+model PaymentOrderClaim {
+  purpose        PaymentPurpose @map("purpose")
+  subjectId      String         @map("subject_id")
+  paymentId      String         @unique(map: "payment_order_claim_payment_id_key") @map("payment_id")
+  amountPaise    Int            @map("amount_paise")
+  attemptedAt    DateTime       @default(now()) @map("attempted_at") @db.Timestamptz(6)
+
+  @@id([purpose, subjectId], map: "payment_order_claim_pkey")
+  @@index([attemptedAt], map: "payment_order_claim_attempted_at_idx")
+  @@map("payment_order_claim")
+  @@schema("public")
+}
+
+/// A durable payment event and its leased job-dispatch state.
+model PaymentOutboxJob {
+  id            String    @id
+  eventKey      String    @unique @map("event_key")
+  jobName       String    @map("job_name")
+  payload       Json
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  claimedAt     DateTime? @map("claimed_at") @db.Timestamptz(6)
+  dispatchedAt  DateTime? @map("dispatched_at") @db.Timestamptz(6)
+
+  @@index([dispatchedAt, createdAt], map: "payment_outbox_pending_idx")
+  @@map("payment_outbox_job")
   @@schema("public")
 }
 

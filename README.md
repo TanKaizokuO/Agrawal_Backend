@@ -103,8 +103,10 @@ npm run build
 # Run linter
 npm run lint
 
-# Run Vitest test suite (set TEST_APP_DATABASE_URL to the agrawal_app role's URL
-# to also run the least-privilege retention and pg-boss checks)
+# Vitest needs TEST_DATABASE_URL and TEST_DATABASE_MIGRATION_URL (or corresponding
+# DATABASE_* URLs) naming a test database; the migration role needs CREATEDB.
+# Each test file creates and drops its own temporary database. TEST_APP_DATABASE_URL,
+# when set, is redirected to that same temporary database for app-role checks.
 npm test
 
 # Generate OpenAPI contract (openapi/v1.yaml & openapi.json)

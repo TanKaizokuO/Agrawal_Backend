@@ -34,7 +34,7 @@ Sensitive values are stored as `SecureString` encrypted with KMS.
 
 - `/agrawal/<env>/DATABASE_URL` (App role credentials)
 - `/agrawal/<env>/DATABASE_MIGRATION_URL` (Owner role credentials for `prisma migrate deploy`)
-- `/agrawal/<env>/WEB_ORIGINS` (Allowed origins for CORS and CSRF)
+- `/agrawal/<env>/WEB_ORIGINS` (required exact origins for CORS and CSRF; no application default)
 - `/agrawal/<env>/FIREBASE_PROJECT_ID`
 - `/agrawal/<env>/FIREBASE_SERVICE_ACCOUNT_JSON`
 - `/agrawal/<env>/RAZORPAY_KEY_ID`
@@ -55,9 +55,10 @@ Sensitive values are stored as `SecureString` encrypted with KMS.
 
 When triggered via SSM, `deploy.sh <env> <IMAGE_URI>` executes:
 
-1. **Parameter Assembly**: Reads `/agrawal/<env>/*` from SSM and generates `.env.<env>` with restricted `0600` file permissions.
-2. **Image Pull**: Pulls the new Docker image from Amazon ECR.
-3. **Database Migration**: Runs `npx prisma migrate deploy` in an isolated ephemeral container using `DATABASE_MIGRATION_URL`. **If migration fails, the deployment exits immediately and existing containers remain untouched.**
+1. **Parameter Assembly**: Reads `/agrawal/<env>/*` from SSM as JSON and generates `.env.<env>` with restricted `0600` permissions.
+   The adjacent `serialize-ssm-env.py` uses Python 3's standard library to write Docker Compose `env_file` syntax, preserving quotes, whitespace, and multiline values; deploy hosts must have Python 3 installed. For staging and production it rejects a missing or blank `WEB_ORIGINS` parameter before migration.
+2. **Image Pull**: Pulls the new Docker image from Amazon ECR. The runner contains compiled application output, production dependencies (including Prisma for migrations), Prisma schemas/migrations/config, and the RDS CA bundle; source, test, and development dependency files are not copied into it.
+3. **Database Migration**: Runs the `migration-<env>` Compose service as an isolated one-off container using `DATABASE_MIGRATION_URL`. This deliberately uses Compose's parser rather than `docker run --env-file`, which does not interpret quoted or multiline values. **If migration fails, the deployment exits immediately and existing containers remain untouched.**
 4. **Service Restart**: Recreates and restarts the service container using `docker compose -f docker-compose.<env>.yml up -d --force-recreate`.
 5. **Readiness Probe**: Polls `http://127.0.0.1:<port>/readyz` until HTTP 200 OK is observed (up to 60s). Fails the SSM command if the endpoint does not become ready.
 

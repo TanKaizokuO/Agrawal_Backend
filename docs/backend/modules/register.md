@@ -167,6 +167,7 @@ Relation, computed per (viewer, subject):
 - Fields are **allow-listed** per relation; a field added to `Member` appears nowhere until added to this table by a decision (invariant 22's closed default).
 - **Name display**: return `{ en, hi }` where `en` is `nameEn` (never `nameEnSearchKey`) and `hi` is `nameHi`. Clients show the script the Member supplied: `en` if present in the English UI, else `hi`; `hi` if present in the Hindi UI, else `en`. A Hindi-only Member shows in Devanagari in both UIs (invariant 21).
 - **Photo**: `photoUrl` is a presigned URL when `consentPhoto` is true **and** `media.isVisibleToOthers(photoImageId)` (i.e. screened and approved). While screening is off, others get `null` and SELF gets the URL with `photoStatus: "UNSCREENED"` (invariant 11 as rewritten).
+- Media removal events for `MEMBER_PHOTO` and `FAMILY_PHOTO` clear only the matching Register-owned `photoImageId` reference in the same transaction. Media emits the event and does not directly update Member or Family rows.
 - Business Listings are public at SAMAJ, but they live in Noticeboards; clients fetch them with `GET /v1/business-listings?ownerMemberId=`.
 - Archived Members project to SAMAJ/FAMILY viewers only through Shok Sandesh and history surfaces, as `{ memberId, name, gotra, deceased: true }`.
 
@@ -211,7 +212,7 @@ Withdrawing the directory-listing consent **is** an Erasure request (`CONTEXT.md
 |---|---|---|---|---|
 | GET | `/v1/me` | member | 1 | SELF projection + `family: { publicId, gotra, isHead, memberCount }` + `roles` + `prompts: { nominee: boolean }` + `officerMessages` (unread first) + `suspension` (Stage 2) + `erasureRequest` status |
 | PATCH | `/v1/me` | member | 1 | Editable: `name`, `nameEnConfirmed`, `fatherOrHusbandName`, `gender`, `dateOfBirth` (still adult), `bloodGroup`, `address` (district recomputed), `nativePlace`, `kuldevi`, `kuldevta`, `uiLanguage`. Not editable: phone, Gotra, Family. |
-| PUT | `/v1/me/consents` | member | 1 | `{ bloodGroupMatching: boolean, photoVisible: boolean }` → ConsentEvents for changes |
+| PUT | `/v1/me/consents` | member | 1 | Partial `{ directory?: true, bloodGroupMatching?: boolean, photoVisible?: boolean }`; at least one field required → ConsentEvents for changes. Directory consent can only be reaffirmed here; withdraw it through Erasure. |
 | PUT | `/v1/me/nominee` | member | 1 | `{ nomineeMemberId: string \| null }`; validation above; clears the prompt |
 | POST | `/v1/me/nominee-prompt/dismiss` | member | 1 | Clears the prompt without naming anyone |
 | PUT | `/v1/me/photo` | member | 1 | `{ imageId: string \| null }` — an image the Member uploaded |
@@ -233,6 +234,8 @@ Withdrawing the directory-listing consent **is** an Erasure request (`CONTEXT.md
 - `q` matching `^AGR-` → exact `familyPublicId`.
 - Filters are exact: `gotra` enum, `state` enum, `city` via `cityKey`.
 - Order: similarity desc, then `nameEn`/`nameHi`. Never search or filter on any field outside the SAMAJ column set — searching by phone or pincode would leak Member-only fields through the result set.
+- Directory search and lookups expose only directory-consenting Members to the wider Samaj. Self and Family viewers retain their own/Family projections; the directory consent does not filter Register projections consumed by other modules.
+- Family directory lookup counts and identifies only visible active Members; an opted-out head's `headMemberId` is omitted for non-Family viewers.
 
 ## Jobs
 
@@ -258,6 +261,7 @@ unarchiveMember(tx, memberId: string, officerId: string): Promise<{ successionRe
 eraseMember(tx, memberId: string, actor: Actor): Promise<void>
 onMemberErased(handler): void
 onMemberArchived(handler): void
+handleImageRemoved(tx, { imageId, purpose }): Promise<void> // detach the matching Member or Family photo
 postOfficerMessage(tx, memberId: string, kind: string, reason: string): Promise<void>
 readNomineeForOfficer(tx, memberId: string, officerId: string, reason: NomineeReadReason): Promise<MemberProjection | null>
 findPossibleDuplicates(profile): Promise<{ samePerson: string[]; sharedAddressHeads: string[] }>
@@ -279,6 +283,7 @@ findPossibleDuplicates(profile): Promise<{ samePerson: string[]; sharedAddressHe
 - invariant 24: Officer Nominee read without a confirmed death or Archival Request → 403; with one → returned and a Processing Record written.
 - invariant 25: `PHONE_ALREADY_REGISTERED` on a duplicate phone.
 - Nominee in another Family → `422 NOMINEE_NOT_IN_FAMILY`; self → `422 NOMINEE_IS_SELF`.
+- Media image removal clears only the matching Member or Family photo reference; unrelated photos remain attached.
 - Directory search by `q` in Devanagari finds a Member who typed only English (via romanized query) and vice versa (via search key).
 - Stage 1 erasure request → `202` + PENDING; with self-service enabled and a fresh token → executed; with a stale token → `401 REAUTH_REQUIRED`.
 

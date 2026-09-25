@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -15,20 +16,38 @@ const prismaCli = require.resolve("prisma/build/index.js");
 
 const runtimeDatabaseUrl = requireTestDatabaseUrl("DATABASE_URL");
 const migrationDatabaseUrl = requireTestDatabaseUrl("DATABASE_MIGRATION_URL");
-const testSchema = "public";
+const appDatabaseUrl = process.env.TEST_APP_DATABASE_URL
+  ? requireTestDatabaseUrl("TEST_APP_DATABASE_URL")
+  : undefined;
+const testDatabaseName = `test_${process.pid.toString()}_${randomUUID().replaceAll("-", "")}`;
+const testRuntimeDatabaseUrl = databaseUrlForName(runtimeDatabaseUrl, testDatabaseName);
+const testMigrationDatabaseUrl = databaseUrlForName(migrationDatabaseUrl, testDatabaseName);
+const testAppDatabaseUrl = appDatabaseUrl
+  ? databaseUrlForName(appDatabaseUrl, testDatabaseName)
+  : undefined;
 
 let database: Database | undefined;
+let testDatabaseCreated = false;
 let adminPool: Pool | undefined;
+let maintenancePool: Pool | undefined;
 
-function requireTestDatabaseUrl(name: "DATABASE_URL" | "DATABASE_MIGRATION_URL"): string {
+type TestDatabaseUrlName = "DATABASE_URL" | "DATABASE_MIGRATION_URL" | "TEST_APP_DATABASE_URL";
+
+function requireTestDatabaseUrl(name: TestDatabaseUrlName): string {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("Vitest database setup requires NODE_ENV=test.");
   }
 
-  const testName = name === "DATABASE_URL" ? "TEST_DATABASE_URL" : "TEST_DATABASE_MIGRATION_URL";
+  const testName =
+    name === "DATABASE_URL"
+      ? "TEST_DATABASE_URL"
+      : name === "DATABASE_MIGRATION_URL"
+        ? "TEST_DATABASE_MIGRATION_URL"
+        : name;
   const value = process.env[testName] ?? process.env[name];
   if (!value) {
-    throw new Error(`${testName} or ${name} is required for the real-Postgres test setup.`);
+    const configuredNames = testName === name ? name : `${testName} or ${name}`;
+    throw new Error(`${configuredNames} is required for the real-Postgres test setup.`);
   }
 
   let url: URL;
@@ -50,9 +69,42 @@ function requireTestDatabaseUrl(name: "DATABASE_URL" | "DATABASE_MIGRATION_URL")
   return value;
 }
 
+function databaseUrlForName(connectionString: string, databaseName: string): string {
+  const url = new URL(connectionString);
+  url.pathname = `/${databaseName}`;
+  return url.toString();
+}
+
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+async function dropTestDatabase(): Promise<void> {
+  if (!maintenancePool || !testDatabaseCreated) {
+    return;
+  }
+
+  await maintenancePool.query(
+    `DROP DATABASE IF EXISTS ${quoteIdentifier(testDatabaseName)} WITH (FORCE)`,
+  );
+  testDatabaseCreated = false;
+}
+
+async function releaseTestDatabaseResources(): Promise<void> {
+  const currentAdminPool = adminPool;
+  adminPool = undefined;
+  try {
+    await currentAdminPool?.end();
+  } finally {
+    try {
+      await dropTestDatabase();
+    } finally {
+      const currentMaintenancePool = maintenancePool;
+      maintenancePool = undefined;
+      await currentMaintenancePool?.end();
+    }
+  }
 }
 
 async function migrateFreshSchema(connectionString: string): Promise<void> {
@@ -115,24 +167,30 @@ export function getTestDatabase(): Database {
   return testDatabaseProxy;
 }
 
+export function getTestDatabaseMigrationUrl(): string {
+  return testMigrationDatabaseUrl;
+}
+
+export function getTestAppDatabaseUrl(): string | undefined {
+  return testAppDatabaseUrl;
+}
+
 beforeAll(async () => {
-  adminPool = new Pool({ connectionString: migrationDatabaseUrl });
+  maintenancePool = new Pool({ connectionString: migrationDatabaseUrl });
 
   try {
-    // Prisma models explicitly target `public`/`restricted`, so a connection
-    // search-path override cannot isolate them. The URL guard above guarantees
-    // this is a test database; rebuild both owned schemas for each test file.
-    await adminPool.query("DROP SCHEMA IF EXISTS restricted CASCADE");
-    await adminPool.query("DROP SCHEMA IF EXISTS public CASCADE");
-    await adminPool.query("CREATE SCHEMA public");
-    await migrateFreshSchema(migrationDatabaseUrl);
-    database = createPrismaClient(runtimeDatabaseUrl);
+    // Prisma models explicitly target public/restricted, so isolate by database.
+    await maintenancePool.query(
+      `CREATE DATABASE ${quoteIdentifier(testDatabaseName)} TEMPLATE template0`,
+    );
+    testDatabaseCreated = true;
+    adminPool = new Pool({ connectionString: testMigrationDatabaseUrl });
+    await migrateFreshSchema(testMigrationDatabaseUrl);
+    database = createPrismaClient(testRuntimeDatabaseUrl);
   } catch (error) {
-    await adminPool.query("DROP SCHEMA IF EXISTS restricted CASCADE").catch(() => undefined);
-    await adminPool.query("DROP SCHEMA IF EXISTS public CASCADE").catch(() => undefined);
-    await adminPool.query("CREATE SCHEMA IF NOT EXISTS public").catch(() => undefined);
-    await adminPool.end();
-    adminPool = undefined;
+    await database?.$disconnect().catch(() => undefined);
+    database = undefined;
+    await releaseTestDatabaseResources().catch(() => undefined);
     throw error;
   }
 });
@@ -144,13 +202,9 @@ beforeEach(async () => {
 afterAll(async () => {
   const currentDatabase = database;
   database = undefined;
-  await currentDatabase?.$disconnect();
-
-  if (adminPool) {
-    await adminPool.query("DROP SCHEMA IF EXISTS restricted CASCADE");
-    await adminPool.query("DROP SCHEMA IF EXISTS public CASCADE");
-    await adminPool.query("CREATE SCHEMA public");
-    await adminPool.end();
-    adminPool = undefined;
+  try {
+    await currentDatabase?.$disconnect();
+  } finally {
+    await releaseTestDatabaseResources();
   }
 });

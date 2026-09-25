@@ -881,7 +881,7 @@
         "tags": [
           "Me"
         ],
-        "summary": "Change blood-group matching or photo visibility consent",
+        "summary": "Change blood-group matching or photo visibility consent, or reaffirm directory consent; withdrawal requires Erasure",
         "operationId": "updateConsents",
         "x-auth": "member",
         "security": [
@@ -5106,6 +5106,7 @@
           "FORBIDDEN",
           "NOT_FOUND",
           "CONFLICT",
+          "PAYLOAD_TOO_LARGE",
           "RATE_LIMITED",
           "IDEMPOTENCY_KEY_REUSED",
           "INTERNAL",
@@ -6613,11 +6614,14 @@
       },
       "ConsentUpdateRequest": {
         "type": "object",
-        "required": [
-          "bloodGroupMatching",
-          "photoVisible"
-        ],
+        "description": "At least one supported consent field is required. Directory consent may only be affirmed; use Erasure to withdraw it.",
+        "minProperties": 1,
+        "additionalProperties": false,
         "properties": {
+          "directory": {
+            "type": "boolean",
+            "const": true
+          },
           "bloodGroupMatching": {
             "type": "boolean"
           },

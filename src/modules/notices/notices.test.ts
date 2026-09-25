@@ -5,9 +5,11 @@ import { FixedClock } from "../../clock.js";
 import { errorMiddleware } from "../../http/errors.js";
 import { InMemoryNoticesDatabase, type NoticesTxClient } from "./db.js";
 import {
+  createNoticesWorkers,
   createOfficerArchivalAdapter,
   createOfficerReportAdapter,
   createOfficerSuspensionAdapter,
+  NOTICES_JOB_NAMES,
 } from "./index.js";
 import type {
   NoticeAuthorProjection,
@@ -91,6 +93,7 @@ interface TestContext {
   readonly service: NoticesService;
   readonly app: Express;
   readonly notifications: NoticePushMessage[];
+  readonly notificationsPort: NoticesNotificationsPort;
   readonly processingRecords: ProcessingEntry[];
   readonly members: Map<string, MemberRecord>;
   readonly consumedPayments: string[];
@@ -319,6 +322,7 @@ function createTestContext(options?: {
     service,
     app,
     notifications,
+    notificationsPort,
     processingRecords,
     members,
     consumedPayments,
@@ -524,6 +528,18 @@ describe("Notices Module Behavioral Specifications", () => {
       paymentId: hiddenPaymentId,
       reason: "PUBLICATION_FAILED",
     });
+  });
+
+  it("consumes a processed Business Listing refund through its purpose worker", async () => {
+    const ctx = createTestContext();
+    const paymentId = crypto.randomUUID();
+    const refundWorker = createNoticesWorkers(ctx.service)
+      .find((worker) => worker.name === NOTICES_JOB_NAMES.paymentRefunded);
+    if (refundWorker === undefined) throw new Error("Business Listing refund worker is missing");
+
+    await refundWorker.handler({ paymentId, subjectId: crypto.randomUUID() });
+
+    expect(ctx.consumedPayments).toContain(paymentId);
   });
 
   it("invariant 13: 4 reports from 4 families keep notice ACTIVE; 5th from 5th family sets HIDDEN", async () => {
@@ -745,6 +761,77 @@ describe("Notices Module Behavioral Specifications", () => {
     expect(suspResAfter.status).toBe(200);
     expect(responseBody<SuspensionResponseBody>(suspResAfter).suspension).toBeNull();
   });
+
+  it("dispatches hide and suspension notices concurrently and rejects after both settle", async () => {
+    const ctx = createTestContext();
+    const authorId = "018f4b7c-3a15-7f20-9f2c-0123456789aa";
+    const createRes = await request(ctx.app)
+      .post("/v1/notices")
+      .send({
+        board: "SHOK_SANDESH",
+        title: "Announcement",
+        bodyEn: "Community notice message body.",
+      });
+    const noticeId = responseBody<NoticeResponseBody>(createRes).notice.id;
+
+    for (let index = 1; index <= 4; index++) {
+      const reporterId = `parallel-reporter-${String(index)}`;
+      ctx.members.set(reporterId, {
+        id: reporterId,
+        familyId: `parallel-family-${String(index)}`,
+        familyPublicId: `AGR-P-${String(index)}`,
+        phoneE164: `+91987654000${String(index)}`,
+        status: "ACTIVE",
+        nameEn: `Reporter ${String(index)}`,
+        nameHi: `रिपोर्टर ${String(index)}`,
+      });
+      await ctx.service.reportNotice(
+        { memberId: reporterId },
+        noticeId,
+        { reason: `Report ${String(index)}` },
+      );
+    }
+
+    const finalReporterId = "parallel-reporter-5";
+    ctx.members.set(finalReporterId, {
+      id: finalReporterId,
+      familyId: "parallel-family-5",
+      familyPublicId: "AGR-P-5",
+      phoneE164: "+919876540005",
+      status: "ACTIVE",
+      nameEn: "Reporter 5",
+      nameHi: "रिपोर्टर ५",
+    });
+
+    let inFlight = 0;
+    let maximumInFlight = 0;
+    const sentTopics: string[] = [];
+    const notificationError = new Error("notification queue unavailable");
+    ctx.notificationsPort.send = async (_memberIds, message) => {
+      sentTopics.push(message.topic);
+      inFlight += 1;
+      maximumInFlight = Math.max(maximumInFlight, inFlight);
+      try {
+        await Promise.resolve();
+        if (message.topic === "NOTICE_HIDDEN") throw notificationError;
+      } finally {
+        inFlight -= 1;
+      }
+    };
+
+    await expect(ctx.service.reportNotice(
+      { memberId: finalReporterId },
+      noticeId,
+      { reason: "Fifth report reaches threshold" },
+    )).rejects.toBe(notificationError);
+
+    expect(maximumInFlight).toBe(2);
+    expect(sentTopics).toEqual(["NOTICE_HIDDEN", "SUSPENSION"]);
+    expect(inFlight).toBe(0);
+    expect((await ctx.db.notice.findUnique({ where: { id: noticeId } }))?.status).toBe("HIDDEN");
+    expect(await ctx.db.suspension.findMany({ where: { memberId: authorId } })).toHaveLength(1);
+  });
+
 
   it("text check: personal phone numbers and blocked words are refused", async () => {
     const ctx = createTestContext();
@@ -1027,6 +1114,59 @@ describe("Notices Module Behavioral Specifications", () => {
 
     expect(fourth.status).toBe(429);
     expect(responseBody<ErrorResponseBody>(fourth).error.code).toBe("POSTING_CAP_REACHED");
+  });
+
+  it("enforces the daily posting cap for concurrent Shok Sandesh submissions", async () => {
+    const ctx = createTestContext({ postingCapPerDay: 2 });
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, (_, index) => request(ctx.app)
+        .post("/v1/notices")
+        .send({
+          board: "SHOK_SANDESH",
+          bodyEn: `Concurrent notice ${String(index)}`,
+        })),
+    );
+    const successful = responses.filter((response) => response.status === 201);
+    const rejected = responses.filter((response) => response.status === 429);
+
+    expect(successful).toHaveLength(2);
+    expect(rejected).toHaveLength(4);
+    expect(rejected.every(
+      (response) => responseBody<ErrorResponseBody>(response).error.code === "POSTING_CAP_REACHED",
+    )).toBe(true);
+    await expect(ctx.db.notice.count({
+      where: {
+        authorMemberId: "018f4b7c-3a15-7f20-9f2c-0123456789aa",
+        createdAt: {
+          gte: new Date("2026-09-19T04:30:00.000Z"),
+          lt: new Date("2026-09-20T04:30:00.000Z"),
+        },
+      },
+    })).resolves.toBe(2);
+  });
+
+  it("keeps a Shok Sandesh and its archival request committed when notification enqueue fails", async () => {
+    const ctx = createTestContext();
+    const authorId = "018f4b7c-3a15-7f20-9f2c-0123456789aa";
+    const deceasedId = "018f4b7c-3a15-7f20-9f2c-0123456789dd";
+    ctx.notificationsPort.send = () => Promise.reject(new Error("notification queue unavailable"));
+
+    await expect(ctx.service.createNotice(
+      { memberId: authorId },
+      ShokSandeshBody.parse({
+        board: "SHOK_SANDESH",
+        linkedMemberId: deceasedId,
+        bodyEn: "A family announcement.",
+      }),
+    )).rejects.toThrow("notification queue unavailable");
+
+    const notices = await ctx.db.notice.findMany({ where: { linkedMemberId: deceasedId } });
+    const archivalRequests = await ctx.db.archivalRequest.findMany({
+      where: { deceasedMemberId: deceasedId },
+    });
+    expect(notices).toHaveLength(1);
+    expect(archivalRequests).toHaveLength(1);
+    expect(archivalRequests[0]?.status).toBe("OPEN");
   });
 
   it("Blood SOS report: no auto-hiding or suspension; appears in officer report queue", async () => {

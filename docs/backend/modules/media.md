@@ -62,12 +62,12 @@ Sightengine call: `POST https://api.sightengine.com/1.0/check.json` as multipart
 ## Officer review and removal
 
 - `GET /v1/officer/images?status=UNSCREENED|APPROVED|REJECTED&cursor=` (role OFFICER): newest first, each with a presigned URL, purpose and owner Member ID. Every page viewed writes a Processing Record `OFFICER_IMAGES_VIEWED` with the image IDs.
-- `POST /v1/officer/images/:imageId/remove` `{ reason: string (5..300) }`: status `REMOVED`, `removedAt`, `removedBy`; detach it from the Member/Family/Notice that uses it (via the owning module's hook); `register.postOfficerMessage(IMAGE_REMOVED, reason)` to the owner; Processing Record `IMAGE_REMOVED`; enqueue S3 deletion. The Member is never removed for an image (`CONTEXT.md`, Officer).
+- `POST /v1/officer/images/:imageId/remove` `{ reason: string (5..300) }`: Media marks the image `REMOVED`, then emits `onImageRemoved` in the same transaction. Register and Noticeboards detach their own Member/Family/Notice references; Media does not write those tables. `src/main.ts` registers each owner's handler for its image purposes. Handlers run sequentially and are awaited: a handler failure aborts the transaction, prevents later removal work and skips S3 deletion enqueue. On success, `register.postOfficerMessage(IMAGE_REMOVED, reason)` tells the owner, a Processing Record `IMAGE_REMOVED` is written, and S3 deletion is enqueued. The Member is never removed for an image (`CONTEXT.md`, Officer).
 - `POST /v1/officer/images/:imageId/approve` (Stage 2, screening on): an Officer override of a wrong refusal (invariant 18) → `APPROVED`, Processing Record `IMAGE_OVERRIDE_APPROVED`. Only possible while the S3 object exists, so from M12 a `REJECTED` image **is** stored, in a `quarantine/` prefix, for 30 days, then deleted by a job. (Amend step 3 accordingly when M12 lands.)
 
 ## Backlog screening (M12)
 
-When screening is switched on, `media.screenBacklog` runs every `UNSCREENED` image through the screener, oldest first, 2 per second. Explicit → `REJECTED` and detached, owner told by an Officer message. Unavailable → stays `UNSCREENED` and is retried next run. Until the backlog is empty, those images stay uploader-only.
+When screening is switched on, `media.screenBacklog` runs every `UNSCREENED` image through the screener, oldest first, 2 per second. Explicit → `REJECTED` and emits `onImageRemoved` so the owner module detaches its reference; the owner is told by an Officer message. Unavailable → stays `UNSCREENED` and is retried next run. Until the backlog is empty, those images stay uploader-only.
 
 ## Ownership transfer and cleanup
 
@@ -86,7 +86,7 @@ ownedBy(imageId: string, owner: Owner, purpose: ImagePurpose): Promise<boolean>
 reassign(tx, imageIds: string[], { fromRegistrationId, ownerMemberId, familyId? }): Promise<void>
 deleteOwnedByRegistration(tx, registrationId: string): Promise<void>
 deleteAllForMember(tx, memberId: string): Promise<void>
-onImageRemoved(handler): void   // owners (Register, Noticeboards) detach the image
+onImageRemoved(handler): void   // attached-image removals emit; owners detach matching references in the same transaction; handler failures propagate
 ```
 
 ## Required tests
@@ -95,7 +95,7 @@ onImageRemoved(handler): void   // owners (Register, Noticeboards) detach the im
 - invariant 11 (screening on): screener returns 0.9 erotica → `IMAGE_REFUSED`; screener times out → `IMAGE_REFUSED` with `SCREENING_UNAVAILABLE`; 0.6 suggestive only → approved.
 - EXIF GPS present in the upload is absent from the stored object.
 - A text file renamed `.jpg` → 415.
-- Officer removal → status `REMOVED`, Member's `photoImageId` cleared, an `OfficerMessage` exists, a Processing Record exists, the S3 object deletion job ran after commit.
+- Officer removal → status `REMOVED`, the matching Member/Family/Notice image reference cleared by its owner module, an `OfficerMessage` exists, a Processing Record exists, the S3 object deletion job ran after commit.
 - A non-Officer calling the Officer routes → 403.
 - Quota: the 31st live image → `422 MEDIA_QUOTA_EXCEEDED`; REMOVED and REJECTED images do not count toward the 30 (ADR-0026 §11).
 

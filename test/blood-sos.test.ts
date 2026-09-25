@@ -4,6 +4,8 @@ import { FixedClock } from "../src/clock.js";
 import type { Database } from "../src/db.js";
 import type { JobRuntime } from "../src/jobs.js";
 import {
+  BLOOD_SOS_JOB_NAMES,
+  createBloodSosWorkers,
   BloodSosService,
   type BloodSosConfig,
   type BloodSosRegisterPort,
@@ -27,11 +29,8 @@ beforeAll(() => {
 
 class RecordingJobs implements JobRuntime {
   readonly enabled = true;
-  readonly events: string[];
 
-  constructor(events: string[]) {
-    this.events = events;
-  }
+  constructor(private readonly events: string[]) {}
 
   start(): Promise<void> { return Promise.resolve(); }
   stop(): Promise<void> { return Promise.resolve(); }
@@ -42,6 +41,7 @@ class RecordingJobs implements JobRuntime {
   }
   registerWorker(): Promise<void> { return Promise.resolve(); }
 }
+
 
 class RejectingNotifications implements NotificationsPort {
   readonly events: string[];
@@ -82,11 +82,21 @@ function registerPort(donorMemberId: string): BloodSosRegisterPort {
 }
 
 describe("Blood SOS lifecycle", () => {
-  it("schedules widening and expiry before isolating a rejected alert", async () => {
+  it("commits tier-one work and recovers it after an asynchronous attempt fails", async () => {
     const requesterMemberId = "00000000-0000-4000-8000-000000000081";
     const donorMemberId = "00000000-0000-4000-8000-000000000082";
     const events: string[] = [];
     const notifications = new RejectingNotifications(events);
+    const register = registerPort(donorMemberId);
+    const donorCandidates = register.donorCandidates.bind(register);
+    let failDonorLookup = true;
+    register.donorCandidates = async (filter) => {
+      if (failDonorLookup) {
+        failDonorLookup = false;
+        throw new Error("donor lookup unavailable");
+      }
+      return donorCandidates(filter);
+    };
     const service = new BloodSosService({
       db,
       clock,
@@ -98,7 +108,7 @@ describe("Blood SOS lifecycle", () => {
         district: "INDORE",
         state: "MADHYA_PRADESH",
       }) },
-      register: registerPort(donorMemberId),
+      register,
       notifications,
       reports: { create: () => Promise.resolve({ id: "report" }) },
       officer: { write: () => Promise.resolve() },
@@ -110,28 +120,45 @@ describe("Blood SOS lifecycle", () => {
       hospitalPincode: "452001",
     });
 
-    expect(events.slice(0, 3)).toEqual([
-      "job:bloodSos.widenTier2",
-      "job:bloodSos.widenTier3",
-      "job:bloodSos.expire",
-    ]);
-    expect(events[3]).toBe("push");
-    expect(view.status).toBe("ACTIVE");
-    expect(view.donorReach).toBe(0);
-
+    expect(events).toEqual(["job:bloodSos.processTier1"]);
+    expect(view).toMatchObject({
+      status: "ACTIVE",
+      currentTier: 1,
+      donorReach: 0,
+      responses: [],
+    });
     await expect(db.bloodSosRequest.findUnique({ where: { id: view.id } })).resolves.toMatchObject({
       status: "ACTIVE",
+      currentTier: 0,
+      donorReachTotal: 0,
+    });
+
+    const tier1Worker = createBloodSosWorkers(service).find(
+      (worker) => worker.name === BLOOD_SOS_JOB_NAMES.processTier1,
+    );
+    if (tier1Worker === undefined) throw new Error("Tier-1 worker is missing");
+    await expect(tier1Worker.handler({ requestId: view.id })).rejects.toThrow("donor lookup unavailable");
+    await expect(db.bloodSosRequest.findUnique({ where: { id: view.id } })).resolves.toMatchObject({
+      status: "ACTIVE",
+      currentTier: 0,
+      donorReachTotal: 0,
+    });
+    await expect(db.bloodSosAlert.findUnique({
+      where: { requestId_donorMemberId: { requestId: view.id, donorMemberId } },
+    })).resolves.toBeNull();
+
+    await expect(service.processPendingRequests()).resolves.toBeUndefined();
+    expect(events).toEqual(["job:bloodSos.processTier1", "push"]);
+    await expect(db.bloodSosRequest.findUnique({ where: { id: view.id } })).resolves.toMatchObject({
+      status: "ACTIVE",
+      currentTier: 1,
       donorReachTotal: 0,
     });
     await expect(db.bloodSosAlert.findUnique({
       where: { requestId_donorMemberId: { requestId: view.id, donorMemberId } },
     })).resolves.toMatchObject({ accepted: false });
 
-    await expect(service.runTier(view.id, 2)).resolves.toBeUndefined();
-    await expect(db.bloodSosRequest.findUnique({ where: { id: view.id } })).resolves.toMatchObject({
-      currentTier: 2,
-      status: "ACTIVE",
-      donorReachTotal: 0,
-    });
+    await expect(service.processPendingRequests()).resolves.toBeUndefined();
+    expect(events).toEqual(["job:bloodSos.processTier1", "push"]);
   });
 });

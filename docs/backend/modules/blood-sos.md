@@ -20,7 +20,7 @@ The register holds no coordinates. Nearness is determined by **place**, looked u
 
 "Compatible" means the clinical red-cell compatibility matrix: a Donor whose group can give to the needed group. ADR-0006 §4 made Tier 1 exact-only and the wider tiers compatible, and ADR-0011 says the matrix still decides who counts as "matching". The matrix is a constant in `blood-sos/compatibility.ts` with its own table test.
 
-Each tier is reached by a timed job (`startAfter`). The request expires at `createdAt + SOS_EXPIRY_HOURS`. Urgency, where the requester supplied it, is shown to donors but changes nothing: no tier fires earlier and no tier is skipped (ADR-0026 §7).
+Tier 1 is enqueued after the request commits. A minute-level reconciler derives due Tier 2/3 work from `createdAt`, retries requests whose persisted tier is pending, and expires requests at `expiresAt`. Urgency, where supplied, changes nothing: no tier fires earlier and no tier is skipped (ADR-0026 §7).
 
 ### Density floor (ADR-0011)
 
@@ -47,7 +47,7 @@ model BloodSosRequest {
   urgency            SosUrgency?                   // display-only; widening stays place-driven (ADR-0026 §7)
   patientRelation    String?                       // free text, e.g. "father"; shown to responding donors
   hospitalArea       String?                       // free-text ward/block; shown to responding donors
-  currentTier        Int              @default(1)  // 1 = city, 2 = district, 3 = state
+  currentTier        Int              @default(0)  // 0 = city fanout pending, 1 = city, 2 = district, 3 = state; API presents at least 1
   donorReachTotal    Int              @default(0)  // running sum of accepted sends
   createdAt          DateTime         @default(now())
   expiresAt          DateTime                      // createdAt + SOS_EXPIRY_HOURS
@@ -152,16 +152,11 @@ Per donor: insert `BloodSosAlert` with `accepted` from the notification result, 
 
 ## Widening jobs
 
-At request creation:
-- Persist the `ACTIVE` request, then enqueue `bloodSos.widenTier2` with `startAfter: now + SOS_TIER_INTERVAL_MINUTES`, `bloodSos.widenTier3` with `startAfter: now + 2 * SOS_TIER_INTERVAL_MINUTES`, and `bloodSos.expire` with `startAfter: expiresAt`.
-- Immediately run Tier 1. A failed or rejected push is isolated to that Donor; it cannot strand an `ACTIVE` request or suppress the widening and expiry jobs.
-
-Each widening job:
-1. Re-read the request. If not `ACTIVE` → exit (already fulfilled/closed).
-2. If `hospitalDistrict` is null (Tier 2), send nothing, set `currentTier = 2`, and leave the state to Tier 3.
-3. Run the matching query for the tier.
-4. Send alerts.
-5. Update `currentTier`.
+- Persist the ACTIVE request with `currentTier = 0` in one transaction. This tier-0 marker is durable pending work; the create response does not wait for donor matching or notification delivery.
+- Enqueue `bloodSos.processTier1` after commit with the request ID as its singleton key, so repeated enqueue attempts for that request do not create parallel fanout jobs. If queue submission fails, leave the request at tier 0; the scheduled reconciler recovers it without returning a failed create response.
+- `bloodSos.processPending` runs every minute. It retries Tier 1 while `currentTier = 0`, runs Tier 2/3 when their created-at intervals have elapsed, and expires requests at `expiresAt`. It runs pending tiers directly; reconciliation does not enqueue additional fanout jobs.
+- Advance `currentTier` only after that tier completes. Database failures leave progress unchanged so the job can retry; alert uniqueness makes completed donor work safe to replay.
+- A failed or rejected push is recorded for that donor and does not prevent the request's widening or expiry lifecycle.
 
 ## Donor response
 
@@ -181,7 +176,7 @@ The response does **not** share the donor's phone number. Contact between reques
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/v1/blood-sos` | member | `{ bloodGroup, hospitalName, hospitalPincode, patientName?, unitsNeeded?, note?, urgency?, patientRelation?, hospitalArea? }` → creates and triggers Tier 1. City, district and state come from `PincodeDirectory` (through `PincodeCache`). If the lookup fails, they come from the requester's own register address with `placeSource = REQUESTER`, and the response says so. An emergency is never refused because a vendor is down. Rate-limited. Idempotency-Key. |
+| POST | `/v1/blood-sos` | member | `{ bloodGroup, hospitalName, hospitalPincode, patientName?, unitsNeeded?, note?, urgency?, patientRelation?, hospitalArea? }` → commits the ACTIVE request and enqueues Tier 1, returning before fanout. The response shows `currentTier: 1` and the current `donorReach`; persisted `currentTier: 0` means Tier 1 is pending. City, district and state come from `PincodeDirectory` (through `PincodeCache`). If the lookup fails, they come from the requester's own register address with `placeSource = REQUESTER`, and the response says so. An emergency is never refused because a vendor is down. Rate-limited. Idempotency-Key. |
 | GET | `/v1/blood-sos/mine` | member | The requester's active request (if any) + recent closed; `donorReach`, `responses` |
 | GET | `/v1/blood-sos/:id` | member | Detail: SAMAJ projections of responding Donors; the requester sees `donorReachTotal`. Other Members see: `bloodGroup`, `hospitalName`, `hospitalCity`, `urgency`, `patientRelation`, `hospitalArea`, `patientName`, `status`. |
 | POST | `/v1/blood-sos/:id/fulfil` | member (requester) | → `CLOSED`, `closedReason: FULFILLED`. Halts further widening. |
@@ -229,11 +224,15 @@ const BloodSosCreateBody = z.object({
 
 | Job | Trigger | Effect |
 |---|---|---|
-| `bloodSos.widenTier2` | `startAfter: +30 min` | Run Tier 2 matching if still ACTIVE |
-| `bloodSos.widenTier3` | `startAfter: +60 min` | Run Tier 3 matching if still ACTIVE |
-| `bloodSos.expire` | `startAfter: expiresAt` | ACTIVE → CLOSED, `closedReason: EXPIRED` |
+| `bloodSos.processTier1` | After request commit | Run Tier 1 asynchronously; retryable while `currentTier = 0` |
+| `bloodSos.processPending` | Every minute | Retry pending tiers, run due Tier 2/3, and expire overdue ACTIVE requests |
+| `bloodSos.widenTier2` | Previously queued `startAfter` job | Process a legacy Tier 2 job if the request still needs it |
+| `bloodSos.widenTier3` | Previously queued `startAfter` job | Process a legacy Tier 3 job if the request still needs it |
+| `bloodSos.expire` | Previously queued `startAfter` job | Expire a legacy queued request if it is still ACTIVE |
 
-No cron jobs; timed per-entity jobs with `startAfter` as specified in `architecture.md`.
+New requests no longer depend on three independent post-commit schedule sends. Persisted tier progress is authoritative; the recurring reconciliation worker recovers missing jobs and completes due lifecycle work.
+
+Migration `20260925000100_blood_sos_durable_work` marks ACTIVE Tier-1 requests with no alert rows as pending so the reconciler can recover work left incomplete by the previous synchronous create path.
 
 ## Rate limits
 
@@ -254,7 +253,8 @@ cancelForMember(tx, memberId: string, reason: string): Promise<void>    // Erasu
 - invariant 15: a request raised for a pincode with 2 matching Donors (below density floor) widens to all Donors in the city; `donorReachTotal` equals the number FCM accepted; the requester sees the count.
 - invariant 15: a request with zero matching Donors at Tier 1 → fallback fires; `donorReachTotal` reflects the fallback sends.
 - invariant 20: no endpoint response body contains `bloodGroup` for any Donor — assert by serialising every Blood SOS response in the suite.
-- Tier widening: Tier 1 fires immediately; Tier 2 fires at `+30 min` (fake clock); Tier 3 at `+60 min`.
+- Tier widening: Tier 1 is enqueued after commit; Tier 2 fires at `+30 min` and Tier 3 at `+60 min` (fake clock).
+- Creation returns with pending Tier-1 work persisted; if the asynchronous attempt fails, reconciliation retries it without requiring the Member to recreate the ACTIVE request.
 - A snoozed Donor is never alerted, not even at the city fallback.
 - A Donor with `lastDonatedOn` 30 days ago is never alerted; at 91 days they are.
 - Compatibility: an O_NEG Donor in the district is alerted at Tier 2 for an A_POS request; an A_POS Donor in the city is not alerted at Tier 1 for an O_NEG request unless the fallback fires.

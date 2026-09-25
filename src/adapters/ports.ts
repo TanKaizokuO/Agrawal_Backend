@@ -63,6 +63,7 @@ export interface PaymentGateway {
     readonly receipt: string;
     readonly notes: Readonly<Record<string, string>>;
   }): Promise<PaymentOrder>;
+  findOrderByReceipt(receipt: string): Promise<PaymentOrder | null>;
   fetchPayment(providerPaymentId: string): Promise<PaymentProviderPayment>;
   fetchOrderPayments(providerOrderId: string): Promise<readonly PaymentProviderPayment[]>;
   capture(input: {
@@ -74,7 +75,9 @@ export interface PaymentGateway {
     readonly amountPaise: number;
     readonly speed: "normal";
     readonly notes: Readonly<Record<string, string>>;
+    readonly idempotencyKey: string;
   }): Promise<PaymentRefund>;
+  fetchRefund(providerRefundId: string): Promise<PaymentRefund>;
 }
 
 export interface ObjectStore {

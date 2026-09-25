@@ -5,52 +5,28 @@ import type { Clock } from "../clock.js";
 import { principalKey } from "./auth.js";
 import { AppError } from "./errors.js";
 
-export interface IdempotencyRecord {
+export type IdempotencyResponseHeader = string | number | readonly string[];
+export type IdempotencyResponseHeaders = Readonly<Record<string, IdempotencyResponseHeader>>;
+
+export interface IdempotencyReservation {
   readonly principalKey: string;
   readonly key: string;
   readonly requestHash: string;
-  readonly responseStatus: number;
-  readonly responseBody: unknown;
   readonly createdAt: Date;
+}
+
+export interface IdempotencyRecord extends IdempotencyReservation {
+  readonly responseStatus: number | null;
+  readonly responseBody: unknown;
+  readonly responseHeaders: IdempotencyResponseHeaders | null;
 }
 
 export interface IdempotencyStore {
   find(principalKey: string, key: string): Promise<IdempotencyRecord | null>;
-  create(record: IdempotencyRecord): Promise<void>;
+  claim(reservation: IdempotencyReservation): Promise<boolean>;
+  complete(record: IdempotencyRecord): Promise<void>;
+  release(reservation: IdempotencyReservation): Promise<void>;
   purge(before: Date): Promise<number>;
-}
-
-interface IdempotencyDelegate {
-  findUnique(args: {
-    where: { principalKey_key: { principalKey: string; key: string } };
-  }): Promise<IdempotencyRecord | null>;
-  create(args: { data: IdempotencyRecord }): Promise<unknown>;
-  deleteMany(args: { where: { createdAt: { lt: Date } } }): Promise<{ count: number }>;
-}
-
-export interface IdempotencyDatabase {
-  readonly idempotencyRecord: IdempotencyDelegate;
-}
-
-export class PrismaIdempotencyStore implements IdempotencyStore {
-  constructor(private readonly database: IdempotencyDatabase) {}
-
-  find(principalKeyValue: string, key: string): Promise<IdempotencyRecord | null> {
-    return this.database.idempotencyRecord.findUnique({
-      where: { principalKey_key: { principalKey: principalKeyValue, key } },
-    });
-  }
-
-  async create(record: IdempotencyRecord): Promise<void> {
-    await this.database.idempotencyRecord.create({ data: record });
-  }
-
-  async purge(before: Date): Promise<number> {
-    const result = await this.database.idempotencyRecord.deleteMany({
-      where: { createdAt: { lt: before } },
-    });
-    return result.count;
-  }
 }
 
 export interface IdempotentOptions {
@@ -123,6 +99,54 @@ function captureResponse(response: Response): {
   };
 }
 
+const NON_REPLAYABLE_HEADERS: Readonly<Record<string, true>> = {
+  connection: true,
+  "content-length": true,
+  date: true,
+  "keep-alive": true,
+  "proxy-authenticate": true,
+  "proxy-authorization": true,
+  te: true,
+  trailer: true,
+  "transfer-encoding": true,
+  upgrade: true,
+  "x-request-id": true,
+};
+
+function responseHeaders(response: Response): IdempotencyResponseHeaders {
+  const headers: Record<string, IdempotencyResponseHeader> = {};
+  for (const [name, value] of Object.entries(response.getHeaders())) {
+    if (Object.hasOwn(NON_REPLAYABLE_HEADERS, name)) continue;
+    if (typeof value === "string" || typeof value === "number") {
+      headers[name] = value;
+    } else if (Array.isArray(value) && value.every((part) => typeof part === "string")) {
+      headers[name] = value;
+    }
+  }
+  return headers;
+}
+
+function respondFromRecord(
+  record: IdempotencyRecord,
+  requestHashValue: string,
+  response: Response,
+  next: (error?: unknown) => void,
+): void {
+  if (record.requestHash !== requestHashValue) {
+    next(new AppError("IDEMPOTENCY_KEY_REUSED", 422));
+    return;
+  }
+  if (record.responseStatus === null) {
+    next(new AppError("CONFLICT", 409));
+    return;
+  }
+  for (const [name, value] of Object.entries(record.responseHeaders ?? {})) {
+    response.setHeader(name, value);
+  }
+  response.status(record.responseStatus).json(record.responseBody);
+}
+
+
 export function idempotent(options: IdempotentOptions): RequestHandler {
   const keyFor = options.principalKey ?? principalKey;
   return async (request, response, next) => {
@@ -151,12 +175,30 @@ export function idempotent(options: IdempotentOptions): RequestHandler {
         existing = await options.store.find(ownerKey, key);
       }
       if (existing !== null) {
-        if (existing.requestHash !== hash) {
-          next(new AppError("IDEMPOTENCY_KEY_REUSED", 422));
+        respondFromRecord(existing, hash, response, next);
+        return;
+      }
+
+      const reservation: IdempotencyReservation = {
+        principalKey: ownerKey,
+        key,
+        requestHash: hash,
+        createdAt: options.clock.now(),
+      };
+      let claimed = await options.store.claim(reservation);
+      if (!claimed) {
+        existing = await options.store.find(ownerKey, key);
+        if (existing !== null) {
+          respondFromRecord(existing, hash, response, next);
           return;
         }
-        response.status(existing.responseStatus).json(existing.responseBody);
-        return;
+        claimed = await options.store.claim(reservation);
+        if (!claimed) {
+          existing = await options.store.find(ownerKey, key);
+          if (existing === null) throw new AppError("INTERNAL", 500);
+          respondFromRecord(existing, hash, response, next);
+          return;
+        }
       }
 
       const captured = captureResponse(response);
@@ -173,19 +215,24 @@ export function idempotent(options: IdempotentOptions): RequestHandler {
           if (typeof encoding === "function") return originalEnd(chunk, encoding);
           return originalEnd(chunk, encoding, callback);
         };
-        if (!captured.hasBody() || response.statusCode >= 500) {
-          return finish();
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          const record: IdempotencyRecord = {
+            ...reservation,
+            responseStatus: response.statusCode,
+            responseBody: captured.hasBody() ? captured.getBody() : null,
+            responseHeaders: responseHeaders(response),
+            createdAt: options.clock.now(),
+          };
+          void options.store.complete(record).then(finish, (error: unknown) => {
+            response.end = originalEnd as Response["end"];
+            next(error);
+          });
+        } else {
+          void options.store.release(reservation).then(finish, (error: unknown) => {
+            response.end = originalEnd as Response["end"];
+            next(error);
+          });
         }
-
-        const record: IdempotencyRecord = {
-          principalKey: ownerKey,
-          key,
-          requestHash: hash,
-          responseStatus: response.statusCode,
-          responseBody: captured.getBody(),
-          createdAt: options.clock.now(),
-        };
-        void options.store.create(record).then(finish, finish);
         return response;
       }) as Response["end"];
       next();

@@ -4,11 +4,11 @@ import { createPrismaClient, type Database } from "../src/db.js";
 import { createJobRuntime, type JobRuntime } from "../src/jobs.js";
 import { OfficerService, type OfficerRegisterPort } from "../src/modules/officer/index.js";
 import { RegisterService } from "../src/modules/register/index.js";
-import { getTestDatabase } from "./setup.js";
+import { getTestAppDatabaseUrl, getTestDatabase } from "./setup.js";
 
 // The least-privilege runtime role. The shared test setup connects as the
 // owner, so these checks only run when a separate app-role URL is provided.
-const appDatabaseUrl = process.env.TEST_APP_DATABASE_URL;
+const appDatabaseUrl = getTestAppDatabaseUrl();
 
 const RESTRICTED_TABLES = ["consent_event", "payment", "refund", "member_tombstone"] as const;
 type RestrictedTable = (typeof RESTRICTED_TABLES)[number];

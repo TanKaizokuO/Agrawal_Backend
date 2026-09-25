@@ -7,6 +7,7 @@ import {
   type MediaObjectStore,
 } from "../src/modules/media/service.js";
 import { RegisterService, type RegisterDeps } from "../src/modules/register/index.js";
+import type { Database } from "../src/db.js";
 import { getTestDatabase } from "./setup.js";
 
 const MEMBER_ID = "019b3d5c-5f0f-7a00-8000-0000000000a1";
@@ -48,8 +49,12 @@ interface PhotoWrites {
   readonly family: unknown[];
 }
 
-function createRegister(media: MediaService, writes: PhotoWrites): RegisterService {
-  const db = {
+function createRegister(
+  media: MediaService,
+  writes: PhotoWrites,
+  database?: RegisterDeps["db"],
+): RegisterService {
+  const testDb = {
     member: {
       update: (args: unknown) => {
         writes.member.push(args);
@@ -69,8 +74,7 @@ function createRegister(media: MediaService, writes: PhotoWrites): RegisterServi
     },
   };
   return new RegisterService({
-    // Unchecked cast for test database mock
-    db: db as unknown as RegisterDeps["db"],
+    db: database ?? (testDb as unknown as RegisterDeps["db"]),
     clock: { now: () => new Date("2026-09-19T10:00:00.000Z"), todayIst: () => "2026-09-19" },
     config: {
       retentionDaysPayments: 365,
@@ -95,6 +99,56 @@ function createRegister(media: MediaService, writes: PhotoWrites): RegisterServi
     payments: { moveToRestricted: () => Promise.resolve(), releaseHeadAnchor: () => Promise.resolve() },
     suspensionResolver: { resolveActiveSuspension: () => Promise.resolve(null) },
     media,
+  });
+}
+
+async function createPhotoOwner(database: Database): Promise<void> {
+  await database.family.create({
+    data: {
+      id: FAMILY_ID,
+      publicId: "AGR-123456-00001",
+      gotra: "GARG",
+      pincodeSnapshot: "123456",
+      headMemberId: MEMBER_ID,
+    },
+  });
+  await database.member.create({
+    data: {
+      id: MEMBER_ID,
+      phoneE164: "+919876543210",
+      status: "ACTIVE",
+      nameEn: "Photo Owner",
+      nameHi: null,
+      nameEnSearchKey: "photo owner",
+      fatherNameEn: "Ram",
+      fatherNameHi: null,
+      fatherNameEnSearchKey: "ram",
+      gender: "MALE",
+      dateOfBirth: new Date("1980-01-01T00:00:00.000Z"),
+      bloodGroup: "O_POS",
+      addressLine1: "12 Market Road",
+      addressLine2: null,
+      city: "Hisar",
+      cityKey: "hisar",
+      district: "Hisar",
+      state: "HARYANA",
+      pincode: "123456",
+      nativePlaceKind: "UNKNOWN",
+      nativePlaceId: null,
+      nativePlaceText: null,
+      kuldevi: null,
+      kuldevta: null,
+      nomineeMemberId: null,
+      nomineePromptPending: false,
+      consentDirectory: true,
+      consentBloodGroup: false,
+      consentPhoto: true,
+      paymentDisclosureAckAt: new Date("2026-09-19T00:00:00.000Z"),
+      uiLanguage: "en",
+    },
+  });
+  await database.familyLink.create({
+    data: { memberId: MEMBER_ID, familyId: FAMILY_ID, kind: "BIRTH" },
   });
 }
 
@@ -164,4 +218,34 @@ describe("Register photo ownership", () => {
 
     expect(writes.family).toHaveLength(1);
   });
+
+  it("clears only the Register photo reference for an image removed by Media", async () => {
+    await createPhotoOwner(database);
+    const memberPhoto = await upload(MEMBER_ID, "MEMBER_PHOTO");
+    const familyPhoto = await media.upload({
+      purpose: "FAMILY_PHOTO",
+      body: await imageBytes(),
+      contentType: "image/jpeg",
+      owner: { memberId: MEMBER_ID, familyId: FAMILY_ID },
+    });
+    await database.member.update({ where: { id: MEMBER_ID }, data: { photoImageId: memberPhoto } });
+    await database.family.update({ where: { id: FAMILY_ID }, data: { photoImageId: familyPhoto.imageId } });
+
+    writes = { member: [], family: [] };
+    register = createRegister(media, writes, database);
+    media.onImageRemoved((tx, event) => {
+      if (event.purpose === "MEMBER_PHOTO" || event.purpose === "FAMILY_PHOTO") {
+        return register.handleImageRemoved(tx, event);
+      }
+      return Promise.resolve();
+    });
+
+    await media.removeImage({ imageId: memberPhoto, officerMemberId: OTHER_MEMBER_ID, reason: "explicit image" });
+    await expect(register.getMe(MEMBER_ID, [])).resolves.toMatchObject({ member: { photoUrl: null } });
+    expect((await register.getFamilyForMember(MEMBER_ID)).family.photoUrl).toMatch(/^https:/u);
+
+    await media.removeImage({ imageId: familyPhoto.imageId, officerMemberId: OTHER_MEMBER_ID, reason: "explicit image" });
+    await expect(register.getFamilyForMember(MEMBER_ID)).resolves.toMatchObject({ family: { photoUrl: null } });
+  });
+
 });

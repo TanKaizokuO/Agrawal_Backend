@@ -45,7 +45,6 @@ export {
 export {
   createBloodSosWorkers,
   JOB_NAMES as BLOOD_SOS_JOB_NAMES,
-  registerBloodSosWorkers,
 } from "./jobs.js";
 
 export {

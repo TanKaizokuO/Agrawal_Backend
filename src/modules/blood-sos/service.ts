@@ -320,7 +320,7 @@ export class BloodSosService {
             patientName: input.patientName ?? null,
             unitsNeeded: input.unitsNeeded ?? null,
             note: input.note ?? null,
-            currentTier: 1,
+            currentTier: 0,
             donorReachTotal: 0,
             createdAt: now,
             expiresAt,
@@ -333,9 +333,17 @@ export class BloodSosService {
       throw error;
     }
 
-    await this.scheduleWidening(created.id, now, expiresAt);
-    await this.runTier(created.id, 1);
-    return this.getRequest(requesterMemberId, created.id);
+    try {
+      await this.jobs.send(
+        JOB_NAMES.processTier1,
+        { requestId: created.id },
+        { ...JOB_RETRY_OPTIONS, singletonKey: created.id },
+      );
+    } catch {
+      // The persisted tier-0 marker is retried by processPendingRequests.
+    }
+
+    return this.toView(requesterMemberId, created, false);
   }
 
   private async resolveHospitalPlace(
@@ -357,33 +365,62 @@ export class BloodSosService {
     return fallbackPlace;
   }
 
-  private async scheduleWidening(
-    requestId: string,
-    createdAt: Date,
-    expiresAt: Date,
-  ): Promise<void> {
-    const interval = this.config.tierIntervalMinutes;
-    await this.jobs.send(
-      JOB_NAMES.widenTier2,
-      { requestId },
-      { startAfter: addMinutes(createdAt, interval), ...JOB_RETRY_OPTIONS },
-    );
-    await this.jobs.send(
-      JOB_NAMES.widenTier3,
-      { requestId },
-      { startAfter: addMinutes(createdAt, interval * 2), ...JOB_RETRY_OPTIONS },
-    );
-    await this.jobs.send(
-      JOB_NAMES.expire,
-      { requestId },
-      { startAfter: expiresAt, ...JOB_RETRY_OPTIONS },
-    );
+  /** Replays persisted tier progress so queue failures cannot strand an ACTIVE request. */
+  public async processPendingRequests(): Promise<void> {
+    const now = this.clock.now();
+    const requests = await this.db.bloodSosRequest.findMany({
+      where: { status: "ACTIVE" },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, currentTier: true, createdAt: true, expiresAt: true },
+    });
+    let failed = false;
+    let firstFailure: unknown;
+
+    for (const request of requests) {
+      try {
+        if (now.getTime() >= request.expiresAt.getTime()) {
+          await this.expire(request.id);
+          continue;
+        }
+
+        let currentTier = request.currentTier;
+        if (currentTier < 1) {
+          await this.runTier(request.id, 1);
+          currentTier = 1;
+        }
+        if (
+          currentTier < 2
+          && now.getTime() >= addMinutes(request.createdAt, this.config.tierIntervalMinutes).getTime()
+        ) {
+          await this.runTier(request.id, 2);
+          currentTier = 2;
+        }
+        if (
+          currentTier < 3
+          && now.getTime() >= addMinutes(request.createdAt, this.config.tierIntervalMinutes * 2).getTime()
+        ) {
+          await this.runTier(request.id, 3);
+        }
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstFailure = error;
+        }
+      }
+    }
+
+    if (failed) throw firstFailure;
   }
 
   /** Run one place tier. Re-running a tier is safe because alerts are unique. */
   public async runTier(requestId: string, tier: 1 | 2 | 3): Promise<void> {
     const request = await this.db.bloodSosRequest.findUnique({ where: { id: requestId } });
-    if (request === null || request.status !== "ACTIVE") return;
+    if (
+      request === null
+      || request.status !== "ACTIVE"
+      || request.currentTier >= tier
+      || request.currentTier < tier - 1
+    ) return;
     if (this.clock.now().getTime() >= request.expiresAt.getTime()) {
       await this.expire(requestId);
       return;
@@ -396,11 +433,7 @@ export class BloodSosService {
 
     const candidates = await this.eligibleCandidates(request, tier);
     for (const donor of candidates) {
-      try {
-        await this.deliverAlert(request, donor, tier, donor.bloodGroupMatch);
-      } catch {
-        // A single delivery failure must not stop widening or expiry.
-      }
+      await this.deliverAlert(request, donor, tier, donor.bloodGroupMatch);
     }
     await this.advanceTier(requestId, tier);
   }
@@ -579,6 +612,7 @@ export class BloodSosService {
   private async toView(
     viewerMemberId: string,
     request: BloodSosRequestRecord,
+    includeResponses = true,
   ): Promise<BloodSosRequestViewBody> {
     const result: BloodSosRequestViewBody = {
       id: request.id,
@@ -589,7 +623,7 @@ export class BloodSosService {
       patientName: request.patientName,
       unitsNeeded: request.unitsNeeded,
       note: request.note,
-      currentTier: request.currentTier,
+      currentTier: Math.max(1, request.currentTier),
       expiresAt: request.expiresAt.toISOString(),
       createdAt: request.createdAt.toISOString(),
       fulfilledAt: request.fulfilledAt?.toISOString() ?? null,
@@ -599,6 +633,10 @@ export class BloodSosService {
     if (viewerMemberId !== request.requesterMemberId) return result;
 
     result.donorReach = request.donorReachTotal;
+    if (!includeResponses) {
+      result.responses = [];
+      return result;
+    }
     const responseRows = await this.db.bloodSosResponse.findMany({
       where: { requestId: request.id },
       orderBy: { createdAt: "asc" },

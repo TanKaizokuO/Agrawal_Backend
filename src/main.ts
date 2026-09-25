@@ -29,6 +29,7 @@ import { createObjectStore } from "./adapters/object-store.js";
 import { createRazorpayGateway } from "./adapters/razorpay.js";
 import { createGoogleRomanizer } from "./adapters/translate.js";
 import {
+  PrismaNoticesTx,
   createNoticesDatabase,
   createNoticesRegisterAdapter,
 } from "./adapters/notices-db.js";
@@ -61,6 +62,7 @@ import {
 } from "./modules/registration/index.js";
 import {
   PaymentService,
+  PaymentWebhookService,
   createPaymentRoutes,
   createPaymentWorkers,
   createWebhookHandler,
@@ -244,12 +246,36 @@ export function createApiRuntime(
     config: {
       razorpayKeyId: config.razorpayKeyId,
       razorpayKeySecret: config.razorpayKeySecret,
-      razorpayWebhookSecret: config.razorpayWebhookSecret,
       paymentIdentityHmacKey: config.paymentIdentityHmacKey,
+      orderCreationClaimLeaseSeconds: config.paymentOrderClaimLeaseSeconds,
+      refundClaimLeaseSeconds: config.paymentRefundClaimLeaseSeconds,
+      outboxClaimLeaseSeconds: config.paymentOutboxClaimLeaseSeconds,
+      outboxJobDedupSeconds: config.paymentOutboxJobDedupSeconds,
     },
     processingRecord,
     restrictedStorage,
     logger: runtimeLogger,
+  });
+
+  const paymentWebhookService = new PaymentWebhookService({
+    db: database,
+    gateway: paymentGateway,
+    jobs,
+    clock,
+    secret: config.razorpayWebhookSecret,
+    logger: runtimeLogger,
+    effects: {
+      applyCapture: (payment) => paymentService.applyCapture(payment),
+      applyFailure: (payment) => paymentService.applyFailure(payment),
+      applyRefundStatus: (input) => paymentService.applyProviderRefundStatus(
+        input.refundId,
+        input.attemptNumber,
+        input.providerRefundId,
+        input.status,
+        undefined,
+        input.failureReason,
+      ),
+    },
   });
 
   const registerService = new RegisterService({
@@ -437,6 +463,15 @@ export function createApiRuntime(
   });
   deferred.notices = noticesService;
 
+  mediaService.onImageRemoved(async (tx, event) => {
+    if (event.purpose !== "MEMBER_PHOTO" && event.purpose !== "FAMILY_PHOTO") return;
+    await registerService.handleImageRemoved(tx, event);
+  });
+  mediaService.onImageRemoved(async (tx, event) => {
+    if (event.purpose !== "BUSINESS_PHOTO" && event.purpose !== "SHOK_SANDESH_PHOTO") return;
+    await noticesService.handleImageRemoved(new PrismaNoticesTx(tx, tx), event.imageId);
+  });
+
   const suspensionResolver = createRegisterSuspensionResolver(noticesService);
   deferred.suspensionResolver = suspensionResolver;
 
@@ -507,7 +542,7 @@ export function createApiRuntime(
     ...createIdentityWorkers({ db: createSessionPurgeDatabase(database), rateLimitStore, clock }),
     ...createHttpWorkers(idempotencyStore, clock),
     ...createRegistrationWorkers(registrationService),
-    ...createPaymentWorkers(paymentService),
+    ...createPaymentWorkers(paymentService, paymentWebhookService),
     ...createMediaWorkers(mediaService),
     ...createNotificationWorkers(notificationsService),
     ...createNoticesWorkers(noticesService),
@@ -567,7 +602,7 @@ export function createApiRuntime(
       mountRawRazorpayWebhook(
         target,
         paymentRouteManifest.receiveWebhook.path,
-        createWebhookHandler({ service: paymentService }),
+        createWebhookHandler({ webhookService: paymentWebhookService }),
       );
     },
     mountRoutes,

@@ -253,22 +253,12 @@ export class RegistrationService implements RegistrationIdentityPort {
       orderBy: { createdAt: "desc" },
     });
 
-    if (existing?.status === "AWAITING_HEAD") {
+    if (existing !== null) {
       await tx.registration.update({
         where: { id: existing.id },
         data: { lastActivityAt: now },
       });
       return { registrationId: existing.id };
-    }
-
-    if (existing !== null) {
-      await this.endRegistration(
-        tx,
-        existing,
-        "ABANDONED",
-        "RESIGNED_IN",
-        existing.status === "PAID" ? "REGISTRATION_ABANDONED" : undefined,
-      );
     }
 
     const created = await tx.registration.create({
@@ -308,6 +298,10 @@ export class RegistrationService implements RegistrationIdentityPort {
       if (registration.status === "PAID" && registration.paymentId === paymentId) return;
       await this.payments.refund(tx, paymentId, "REGISTRATION_ABANDONED", { kind: "SYSTEM" });
     });
+  }
+
+  async onRegistrationPaymentRefunded(paymentId: string): Promise<void> {
+    await this.db.$transaction((tx) => this.payments.markConsumed(tx, paymentId));
   }
 
   async createPaymentOrder(

@@ -252,6 +252,36 @@ describe("Media visibility, ownership and cleanup", () => {
     await expect(screeningService.urlFor(uploaded.imageId, { memberId: OTHER_MEMBER_ID })).resolves.toBeNull();
   });
 
+  it("rolls back image removal when an onImageRemoved handler fails", async () => {
+    const objectStore = new FakeObjectStore();
+    const jobs = new FakeJobs();
+    const service = createService(database, objectStore, jobs, { screeningEnabled: false });
+    const uploaded = await service.upload({
+      purpose: "MEMBER_PHOTO",
+      body: await imageBytes(),
+      contentType: "image/jpeg",
+      owner: { memberId: MEMBER_ID },
+    });
+    const handlerFailure = new Error("register cleanup failed");
+    let laterHandlerRan = false;
+    service.onImageRemoved(() => Promise.reject(handlerFailure));
+    service.onImageRemoved(() => {
+      laterHandlerRan = true;
+      return Promise.resolve();
+    });
+
+    await expect(service.removeImage({
+      imageId: uploaded.imageId,
+      officerMemberId: OTHER_MEMBER_ID,
+      reason: "explicit image",
+    })).rejects.toBe(handlerFailure);
+
+    expect(laterHandlerRan).toBe(false);
+    expect((await database.image.findUnique({ where: { id: uploaded.imageId } }))?.status).toBe("UNSCREENED");
+    expect(objectStore.objects.has(`images/${uploaded.imageId}.jpg`)).toBe(true);
+    expect(jobs.sent.filter((job) => job.name === JOB_NAMES.deleteObject)).toHaveLength(0);
+  });
+
   it("rejects replacement by a different owner and erases member objects through deletion jobs", async () => {
     const objectStore = new FakeObjectStore();
     const jobs = new FakeJobs();

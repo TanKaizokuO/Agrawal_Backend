@@ -48,7 +48,7 @@ export { Prisma }
 export type RateLimitBucket = Prisma.RateLimitBucketModel
 /**
  * Model IdempotencyRecord
- * The completed response for a client action that supplied an idempotency key.
+ * An idempotency key and request hash, with a null response status while its operation is in flight.
  */
 export type IdempotencyRecord = Prisma.IdempotencyRecordModel
 /**
@@ -173,6 +173,21 @@ export type Payment = Prisma.PaymentModel
  * 
  */
 export type Refund = Prisma.RefundModel
+/**
+ * Model RefundAttempt
+ * One logical refund attempt; its provider ID is retained when later retries begin.
+ */
+export type RefundAttempt = Prisma.RefundAttemptModel
+/**
+ * Model PaymentOrderClaim
+ * A leased order-creation reservation; its payment ID is the provider receipt for recovery.
+ */
+export type PaymentOrderClaim = Prisma.PaymentOrderClaimModel
+/**
+ * Model PaymentOutboxJob
+ * A durable payment event and its leased job-dispatch state.
+ */
+export type PaymentOutboxJob = Prisma.PaymentOutboxJobModel
 /**
  * Model HeadAnchor
  * 

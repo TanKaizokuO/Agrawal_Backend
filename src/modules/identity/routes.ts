@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import {
+  expiredSessionCookie,
   requirePrincipal,
+  sessionCookie,
   type ApplicantPrincipal,
   type MemberPrincipal,
   type Principal,
@@ -27,15 +29,6 @@ export interface IdentityRouteDeps {
   readonly service: IdentityService;
 }
 
-function clientIp(request: Request): string {
-  const forwarded = request.get("X-Forwarded-For");
-  const firstForwarded = forwarded?.split(",", 1)[0]?.trim();
-  if (firstForwarded !== undefined && firstForwarded.length > 0) {
-    return firstForwarded;
-  }
-  return request.ip || "unknown";
-}
-
 function publicPrincipal(principal: Principal): PublicPrincipal {
   if (principal.kind === "APPLICANT") {
     const applicant: ApplicantPrincipal = principal;
@@ -56,13 +49,6 @@ function publicPrincipal(principal: Principal): PublicPrincipal {
   };
 }
 
-function sessionCookie(token: string, maxAgeSeconds: number): string {
-  return `sid=${token}; Max-Age=${String(maxAgeSeconds)}; Path=/; HttpOnly; Secure; SameSite=Lax`;
-}
-
-function expiredSessionCookie(): string {
-  return "sid=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax";
-}
 
 function currentPrincipal(request: Request): Principal {
   const principal = request.principal;
@@ -83,7 +69,7 @@ export function createIdentityRoutes(deps: IdentityRouteDeps): Router {
       const created = await deps.service.createSession({
         idToken: body.firebaseIdToken,
         client: body.client,
-        ipAddress: clientIp(request),
+        ipAddress: request.ip || "unknown",
         ...(userAgent === undefined ? {} : { userAgent }),
       });
       const principal = publicPrincipal(created.principal);

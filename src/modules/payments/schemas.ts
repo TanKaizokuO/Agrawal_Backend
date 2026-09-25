@@ -27,7 +27,7 @@ export const PaymentViewResponse = z.object({
   capturedAt: z.iso.datetime({ offset: true }).nullable(),
   refund: z
     .object({
-      status: z.enum(["REQUESTED", "PROCESSED", "FAILED"]),
+      status: z.enum(["REQUESTED", "PROCESSING", "PROCESSED", "FAILED"]),
       reason: z.enum([
         "DUPLICATE_HEAD",
         "JOIN_DECLINED",

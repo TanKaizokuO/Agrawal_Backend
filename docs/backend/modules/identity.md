@@ -62,7 +62,7 @@ The first Officer and Operator (Mr Rahul, ADR-0016) are granted by a one-off see
 - Token: 32 bytes from `crypto.randomBytes`, base64url. Only `sha256(token)` is stored.
 - Web: `Set-Cookie: sid=<token>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=<ttl>`; host-only (no `Domain` attribute) on the API host. The token is never in the response body for web.
 - Mobile: token returned in the body; the app keeps it in `flutter_secure_storage` and sends `Authorization: Bearer <token>`.
-- Sliding expiry: on each authenticated request, if `lastSeenAt` is older than 1 hour, update `lastSeenAt` and extend `expiresAt` to now + TTL (web 30 days, mobile 90 days). Idle beyond TTL → expired.
+- Sliding expiry: on each authenticated request, if `lastSeenAt` is older than 1 hour, update `lastSeenAt` and extend `expiresAt` to now + TTL (web 30 days, mobile 90 days). The resolver returns whether it extended the session; HTTP middleware renews the cookie only for an extended cookie session. Idle beyond TTL → expired; revoked or expired web cookies are cleared and treated as anonymous so the user can sign in again.
 - A request presenting both a cookie and a bearer token is rejected `400 VALIDATION_FAILED`.
 
 ## Rules
@@ -78,7 +78,7 @@ The first Officer and Operator (Mr Rahul, ADR-0016) are granted by a one-off see
 
 ## Middleware (`src/http/auth.ts`)
 
-- `authenticate` (global): resolves cookie or bearer → session → principal; attaches `req.principal = { kind: 'APPLICANT', sessionId, phoneE164, registrationId } | { kind: 'MEMBER', sessionId, phoneE164, memberId, roles: Role[], isHead: boolean }`. Missing credentials → `req.principal = null`.
+- `IdentityService.resolve` returns `{ principal, sessionRefreshed } | null` and does not receive or write an Express `Response`. `authenticate` attaches the principal and owns cookie renewal or expiration; missing credentials → `req.principal = null`, while invalid or expired credentials are anonymous and an invalid web cookie is cleared.
 - `requirePrincipal`, `requireApplicant`, `requireMember`, `requireRole(role)`, `requireHead` → `401 UNAUTHENTICATED` / `403 FORBIDDEN`.
 - `isHead` is computed by asking Register `register.isHeadOf(memberId)`.
 
@@ -112,7 +112,7 @@ Module error codes: `FIREBASE_TOKEN_INVALID` 401, `PHONE_BELONGS_TO_ARCHIVED_MEM
 | `media.upload` | principal | 20 / hour |
 | `officer.*` | memberId | 600 / hour |
 
-Client IP is the first address of `X-Forwarded-For` as set by Caddy; configure Express `trust proxy` to exactly one hop.
+Login IP rate limits use Express `request.ip`, not a caller-selected `X-Forwarded-For` entry. Express trusts exactly one proxy hop; Caddy overwrites `X-Forwarded-For` with its remote peer address. The API ports are loopback-bound in deployment and must not be exposed directly; another proxy must enforce the same overwrite contract.
 
 ## Public interface (`index.ts`)
 

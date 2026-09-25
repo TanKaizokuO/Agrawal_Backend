@@ -2,6 +2,8 @@ import type { Express } from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import type { PrincipalResolver } from "../src/http/auth.js";
+import { AppError } from "../src/http/errors.js";
 import { createApp } from "../src/app.js";
 import { ConfigError, loadConfig } from "../src/config.js";
 import { HealthResponse, ReadinessResponse } from "../src/openapi/registry.js";
@@ -24,10 +26,11 @@ const AcceptedResponse = z.object({
 type AppOptions = {
   readonly jobsReady?: boolean;
   readonly mountRoutes?: (app: Express) => void;
+  readonly principalResolver?: PrincipalResolver;
 };
 
 function createFoundationApp(options: AppOptions = {}): Express {
-  const mountRoutes = options.mountRoutes;
+  const { mountRoutes, principalResolver } = options;
   return createApp({
     config: { webOrigins: [WEB_ORIGIN] },
     database: getTestDatabase(),
@@ -35,6 +38,7 @@ function createFoundationApp(options: AppOptions = {}): Express {
       isReady: () => Promise.resolve(options.jobsReady ?? true),
     },
     ...(mountRoutes === undefined ? {} : { mountRoutes }),
+    ...(principalResolver === undefined ? {} : { principalResolver }),
   });
 }
 
@@ -118,6 +122,106 @@ describe("M0 HTTP foundations", () => {
     const acceptedBody = AcceptedResponse.parse(accepted.body);
     expect(accepted.status).toBe(201);
     expect(acceptedBody).toEqual({ accepted: true });
+  });
+
+  it("clears stale cookies and renews only sessions extended by the resolver", async () => {
+    const principal = {
+      kind: "MEMBER" as const,
+      sessionId: "session-1",
+      phoneE164: "+919999900000",
+      memberId: "member-1",
+      familyPublicId: "AGR-123456-00001",
+      roles: [],
+      isHead: false,
+    };
+    const app = createFoundationApp({
+      principalResolver: {
+        resolve: (request) => {
+          const cookie = request.get("Cookie");
+          if (cookie?.includes("sid=stale") === true) {
+            return Promise.reject(new AppError("SESSION_EXPIRED", 401));
+          }
+          return Promise.resolve({
+            principal,
+            sessionRefreshed: cookie?.includes("sid=valid") === true,
+          });
+        },
+        sessionTtlSeconds: () => 3600,
+      },
+      mountRoutes: (mountedApp) => {
+        mountedApp.get("/v1/foundation-session", (request, response) => {
+          response.json({ principal: request.principal });
+        });
+        mountedApp.post("/v1/auth/session", (_request, response) => {
+          response.setHeader(
+            "Set-Cookie",
+            "sid=recovered; Max-Age=3600; Path=/; HttpOnly; Secure; SameSite=Lax",
+          );
+          response.status(201).json({ signedIn: true });
+        });
+      },
+    });
+
+    const valid = await request(app)
+      .get("/v1/foundation-session")
+      .set("Cookie", "sid=valid");
+    expect(valid.status).toBe(200);
+    expect(valid.headers["set-cookie"]).toEqual([
+      "sid=valid; Max-Age=3600; Path=/; HttpOnly; Secure; SameSite=Lax",
+    ]);
+
+    const recent = await request(app)
+      .get("/v1/foundation-session")
+      .set("Cookie", "sid=recent");
+    expect(recent.status).toBe(200);
+    expect(recent.headers["set-cookie"]).toBeUndefined();
+
+    const stale = await request(app)
+      .get("/v1/foundation-session")
+      .set("Cookie", "sid=stale");
+    expect(stale.status).toBe(200);
+    const staleBody = z.object({ principal: z.null() }).parse(stale.body);
+    expect(staleBody.principal).toBeNull();
+    expect(stale.headers["set-cookie"]).toEqual([
+      "sid=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+    ]);
+
+    const login = await request(app)
+      .post("/v1/auth/session")
+      .set("Cookie", "sid=stale")
+      .set("Origin", WEB_ORIGIN)
+      .send({});
+    expect(login.status).toBe(201);
+    expect(login.body).toEqual({ signedIn: true });
+    expect(login.headers["set-cookie"]).toEqual([
+      "sid=recovered; Max-Age=3600; Path=/; HttpOnly; Secure; SameSite=Lax",
+    ]);
+  });
+
+  it("maps malformed and oversized JSON bodies to 400 and 413", async () => {
+    const app = createFoundationApp({
+      mountRoutes: (mountedApp) => {
+        mountedApp.post("/v1/foundation-parser", (_request, response) => {
+          response.status(201).json({ accepted: true });
+        });
+      },
+    });
+
+    const malformed = await request(app)
+      .post("/v1/foundation-parser")
+      .set("Content-Type", "application/json")
+      .send("{");
+    expect(malformed.status).toBe(400);
+    const malformedBody = ErrorResponse.parse(malformed.body);
+    expect(malformedBody.error.code).toBe("VALIDATION_FAILED");
+
+    const oversized = await request(app)
+      .post("/v1/foundation-parser")
+      .set("Content-Type", "application/json")
+      .send(JSON.stringify({ value: "x".repeat(2 * 1024 * 1024) }));
+    expect(oversized.status).toBe(413);
+    const oversizedBody = ErrorResponse.parse(oversized.body);
+    expect(oversizedBody.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
   it("requires an exact allowed origin for cookie-authenticated writes", async () => {
