@@ -10,6 +10,7 @@ This directory contains the deployment and operational infrastructure assets for
 - **Database**: PostgreSQL on AWS RDS (`db.t3.small`; target PG 16, current instance 18.3), separate databases `agrawal_staging` and `agrawal_prod`.
 - **Reverse Proxy / TLS**: Caddy container terminating TLS via Let's Encrypt / ZeroSSL for both hostnames (`staging-api.<domain>` and `api.<domain>`).
 - **Web Frontend**: Web surfaces (`Agrawal_Frontend`) also deploy to AWS (S3+CloudFront or EC2+Caddy); Vercel is retired (Agrawal_App ADR-0028).
+- **Ingress**: API hostnames resolve straight to the EC2 Elastic IP and Caddy; CloudFront serves only the web bucket. In `deploy/terraform`, only the production stack claims the apex, `www` and `register` names; a staging stack serves its web client from its `*.cloudfront.net` domain, which is also its `WEB_ORIGINS` entry.
 - **Access**: SSH is closed. Access and deployments are performed exclusively via AWS Systems Manager (SSM) Session Manager and Run Command.
 - **CI/CD**: GitHub Actions builds Docker images, pushes to Amazon ECR, and executes `deploy.sh` via `aws ssm send-command`.
 

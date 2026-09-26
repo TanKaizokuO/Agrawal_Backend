@@ -6,15 +6,18 @@
 #   - Issue #13 (Operator inputs owed: Domain name)
 #   - ADR-0026 & ADR-0028 (Hosted domain surfaces: apex, register, api)
 #
+# Web hostnames go through CloudFront; the API host goes straight to Caddy.
+#
 # Provisions DNS records if var.route53_zone_id is supplied by operator.
 # ==============================================================================
 
-# Apex domain (e.g. agrawal.app) -> CloudFront
-resource "aws_route53_record" "apex" {
-  count   = var.route53_zone_id != "" ? 1 : 0
-  zone_id = var.route53_zone_id
-  name    = var.domain_name
-  type    = "A"
+# Web hostnames (apex, www, register) -> CloudFront. Production only; see
+# local.web_hosts.
+resource "aws_route53_record" "web" {
+  for_each = var.route53_zone_id != "" ? local.web_hosts : {}
+  zone_id  = var.route53_zone_id
+  name     = each.value
+  type     = "A"
 
   alias {
     name                   = aws_cloudfront_distribution.main.domain_name
@@ -23,35 +26,23 @@ resource "aws_route53_record" "apex" {
   }
 }
 
-# WWW subdomain -> CloudFront
-resource "aws_route53_record" "www" {
-  count   = var.route53_zone_id != "" ? 1 : 0
-  zone_id = var.route53_zone_id
-  name    = "www.${var.domain_name}"
-  type    = "A"
-
-  alias {
-    name                   = aws_cloudfront_distribution.main.domain_name
-    zone_id                = aws_cloudfront_distribution.main.hosted_zone_id
-    evaluate_target_health = false
-  }
+moved {
+  from = aws_route53_record.apex[0]
+  to   = aws_route53_record.web["apex"]
 }
 
-# Registration Portal (register.<domain>) -> CloudFront
-resource "aws_route53_record" "register" {
-  count   = var.route53_zone_id != "" ? 1 : 0
-  zone_id = var.route53_zone_id
-  name    = "register.${var.domain_name}"
-  type    = "A"
-
-  alias {
-    name                   = aws_cloudfront_distribution.main.domain_name
-    zone_id                = aws_cloudfront_distribution.main.hosted_zone_id
-    evaluate_target_health = false
-  }
+moved {
+  from = aws_route53_record.www[0]
+  to   = aws_route53_record.web["www"]
 }
 
-# API Subdomain (api.<domain> or staging-api.<domain>) -> EC2 Elastic IP
+moved {
+  from = aws_route53_record.register[0]
+  to   = aws_route53_record.web["register"]
+}
+
+# API host (api.<domain> or staging-api.<domain>) -> EC2 Elastic IP. This is the
+# only ingress path for the API: Caddy obtains and serves its certificate.
 resource "aws_route53_record" "api" {
   count   = var.route53_zone_id != "" ? 1 : 0
   zone_id = var.route53_zone_id
