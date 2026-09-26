@@ -55,3 +55,9 @@ coverage/
 *.p12
 *.pfx
 !/global-bundle.pem
+
+# Terraform / OpenTofu local provider cache, state and real variable files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars

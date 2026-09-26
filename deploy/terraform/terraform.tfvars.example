@@ -1,0 +1,50 @@
+# ==============================================================================
+# terraform.tfvars.example
+#
+# Template input variables for Agrawal Samaj AWS Infrastructure.
+# Copy this file to terraform.tfvars and fill in the required variables.
+# NEVER commit terraform.tfvars or any credential to source control.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# REQUIRED OPERATOR INPUTS (NO DEFAULT - MUST BE SUPPLIED)
+# ------------------------------------------------------------------------------
+
+# Hosted Domain Name (tracked as an open operator decision in Issue #13)
+# Example: "agrawal.app" or "agrawalsamaj.org"
+domain_name = "<REQUIRED: Authoritative domain name owed by operator in Issue #13>"
+
+# Master PostgreSQL Password for RDS (bootstrap only)
+# Must be at least 16 characters with mixed case, numbers, and symbols.
+db_master_password = "<REQUIRED: Strong master password for RDS bootstrap>"
+
+# Least-privilege Application Role Password (agrawal_app)
+# Used by Express API runtime (DATABASE_URL)
+app_db_password = "<REQUIRED: Strong password for runtime agrawal_app role>"
+
+# Migration Owner Role Password (agrawal_owner)
+# Used solely by 'prisma migrate deploy' in one-off container (DATABASE_MIGRATION_URL)
+migration_db_password = "<REQUIRED: Strong password for migration agrawal_owner role>"
+
+# Operator Contact Email (for ACME TLS certificate notifications and alerts)
+operator_email = "<REQUIRED: Operator email address>"
+
+# ------------------------------------------------------------------------------
+# CONFIGURABLE ENVIRONMENT SETTINGS (WITH SAFE DEFAULTS)
+# ------------------------------------------------------------------------------
+
+aws_region  = "ap-south-1"
+environment = "staging" # "staging" or "production"
+
+# Compute & Storage Sizing per ADR-0017
+ec2_instance_type          = "t3.small"
+ec2_root_volume_size_gb    = 20
+rds_instance_class         = "db.t3.small"
+rds_engine_version         = "18.3" # Pinned by ADR-0029
+rds_allocated_storage_gb   = 20
+rds_max_allocated_storage_gb = 100
+rds_backup_retention_days  = 35   # Stated retention window per Issue #2
+
+# Optional TLS / Route 53 (if domain is managed in Route 53)
+# acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+# route53_zone_id     = "Z0123456789ABCDEF"
