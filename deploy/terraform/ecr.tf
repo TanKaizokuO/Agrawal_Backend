@@ -41,8 +41,11 @@ locals {
   })
 }
 
-# Staging ECR Repository
+# Each environment's stack manages only its own repository, so a staging apply
+# can never modify or destroy the production registry. Repository names are
+# unchanged; .github/workflows/api.yml pushes to them by name.
 resource "aws_ecr_repository" "staging" {
+  count                = local.is_production ? 0 : 1
   name                 = "agrawal-api-staging"
   image_tag_mutability = "MUTABLE"
 
@@ -55,18 +58,18 @@ resource "aws_ecr_repository" "staging" {
   }
 
   tags = {
-    Name        = "agrawal-api-staging"
-    Environment = "staging"
+    Name = "agrawal-api-staging"
   }
 }
 
 resource "aws_ecr_lifecycle_policy" "staging" {
-  repository = aws_ecr_repository.staging.name
+  count      = local.is_production ? 0 : 1
+  repository = aws_ecr_repository.staging[0].name
   policy     = local.ecr_lifecycle_policy
 }
 
-# Production ECR Repository
 resource "aws_ecr_repository" "prod" {
+  count                = local.is_production ? 1 : 0
   name                 = "agrawal-api-prod"
   image_tag_mutability = "IMMUTABLE" # Production images are immutable
 
@@ -79,12 +82,12 @@ resource "aws_ecr_repository" "prod" {
   }
 
   tags = {
-    Name        = "agrawal-api-prod"
-    Environment = "production"
+    Name = "agrawal-api-prod"
   }
 }
 
 resource "aws_ecr_lifecycle_policy" "prod" {
-  repository = aws_ecr_repository.prod.name
+  count      = local.is_production ? 1 : 0
+  repository = aws_ecr_repository.prod[0].name
   policy     = local.ecr_lifecycle_policy
 }

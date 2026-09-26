@@ -75,14 +75,9 @@ output "kms_key_alias" {
   value       = aws_kms_alias.ssm_alias.name
 }
 
-output "ecr_staging_repository_url" {
-  description = "Amazon ECR repository URL for staging images"
-  value       = aws_ecr_repository.staging.repository_url
-}
-
-output "ecr_prod_repository_url" {
-  description = "Amazon ECR repository URL for production images"
-  value       = aws_ecr_repository.prod.repository_url
+output "ecr_repository_url" {
+  description = "Amazon ECR repository URL for this environment's images"
+  value       = local.is_production ? aws_ecr_repository.prod[0].repository_url : aws_ecr_repository.staging[0].repository_url
 }
 
 output "ssm_parameter_prefix" {
