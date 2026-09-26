@@ -6,8 +6,6 @@
 # Access: SSH is closed; managed exclusively via AWS Systems Manager (SSM).
 # ==============================================================================
 
-data "aws_caller_identity" "current" {}
-
 # Latest Ubuntu 24.04 LTS Noble Numbat AMI in ap-south-1
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -126,6 +124,13 @@ resource "aws_instance" "api" {
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
   vpc_security_group_ids = [aws_security_group.ec2.id]
+
+  # data.aws_ami.ubuntu tracks the newest Noble image; without this every new
+  # Canonical release would plan a replacement of the API host. Roll the AMI
+  # deliberately with `tofu apply -replace=aws_instance.api`.
+  lifecycle {
+    ignore_changes = [ami]
+  }
 
   # Root block volume: gp3 20 GB encrypted
   root_block_device {

@@ -5,6 +5,9 @@
 # production never disagree about which host serves what.
 # ==============================================================================
 
+# Account ID used in bucket names, KMS policy and IAM ARNs across files.
+data "aws_caller_identity" "current" {}
+
 locals {
   is_production = var.environment == "production"
 

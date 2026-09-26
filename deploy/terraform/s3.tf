@@ -8,6 +8,59 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+# Settings shared by both buckets: Block Public Access (all four settings) and
+# SSE-S3 (AES256) encryption at rest.
+# ------------------------------------------------------------------------------
+
+locals {
+  private_buckets = {
+    media = aws_s3_bucket.media.id
+    web   = aws_s3_bucket.web.id
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "private" {
+  for_each = local.private_buckets
+  bucket   = each.value
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "private" {
+  for_each = local.private_buckets
+  bucket   = each.value
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+moved {
+  from = aws_s3_bucket_public_access_block.media
+  to   = aws_s3_bucket_public_access_block.private["media"]
+}
+
+moved {
+  from = aws_s3_bucket_public_access_block.web
+  to   = aws_s3_bucket_public_access_block.private["web"]
+}
+
+moved {
+  from = aws_s3_bucket_server_side_encryption_configuration.media
+  to   = aws_s3_bucket_server_side_encryption_configuration.private["media"]
+}
+
+moved {
+  from = aws_s3_bucket_server_side_encryption_configuration.web
+  to   = aws_s3_bucket_server_side_encryption_configuration.private["web"]
+}
+
+# ------------------------------------------------------------------------------
 # 1. Private Media Bucket (User photos, documents, Noticeboard attachments)
 # ------------------------------------------------------------------------------
 
@@ -18,27 +71,6 @@ resource "aws_s3_bucket" "media" {
     Name        = "agrawal-${var.environment}-media"
     Purpose     = "PrivateMediaStorage"
     Environment = var.environment
-  }
-}
-
-# Strict S3 Block Public Access (All 4 settings enforced)
-resource "aws_s3_bucket_public_access_block" "media" {
-  bucket = aws_s3_bucket.media.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# Server-Side Encryption at Rest (SSE-S3 / AES256)
-resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
-  bucket = aws_s3_bucket.media.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
   }
 }
 
@@ -91,25 +123,6 @@ resource "aws_s3_bucket" "web" {
     Name        = "agrawal-${var.environment}-web"
     Purpose     = "StaticFrontendHosting"
     Environment = var.environment
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "web" {
-  bucket = aws_s3_bucket.web.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
-  bucket = aws_s3_bucket.web.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
   }
 }
 

@@ -110,10 +110,30 @@ resource "aws_ssm_parameter" "s3_bucket" {
 # Operators populate real values out-of-band via AWS CLI / Console.
 # ------------------------------------------------------------------------------
 
-resource "aws_ssm_parameter" "firebase_project_id" {
-  name        = "/agrawal/${var.environment}/FIREBASE_PROJECT_ID"
-  description = "Firebase Project ID for Phone Authentication"
-  type        = "String"
+locals {
+  # Parameter name => settings. Terraform creates each with a placeholder once;
+  # operators set the real value out-of-band and ignore_changes keeps it.
+  operator_parameters = {
+    FIREBASE_PROJECT_ID                 = { secure = false, description = "Firebase Project ID for Phone Authentication" }
+    FIREBASE_SERVICE_ACCOUNT_JSON       = { secure = true, description = "Firebase Service Account JSON credentials" }
+    RAZORPAY_KEY_ID                     = { secure = true, description = "Razorpay Key ID" }
+    RAZORPAY_KEY_SECRET                 = { secure = true, description = "Razorpay Key Secret" }
+    RAZORPAY_WEBHOOK_SECRET             = { secure = true, description = "Razorpay Webhook verification secret" }
+    PAYMENT_IDENTITY_HMAC_KEY           = { secure = true, description = "32 random bytes, base64-encoded, for payment identity HMAC hashing" }
+    GOOGLE_CLOUD_PROJECT                = { secure = false, description = "Google Cloud Project ID for Translation / romanizeText" }
+    GOOGLE_APPLICATION_CREDENTIALS_JSON = { secure = true, description = "Google Cloud service account JSON credentials" }
+    EVENT_PASS_SIGNING_KEYS             = { secure = true, description = "JSON array of Ed25519 signing keys for Event Passes" }
+    SIGHTENGINE_API_USER                = { secure = false, description = "Sightengine API User ID" }
+    SIGHTENGINE_API_SECRET              = { secure = true, description = "Sightengine API Secret" }
+  }
+}
+
+resource "aws_ssm_parameter" "operator" {
+  for_each    = local.operator_parameters
+  name        = "/agrawal/${var.environment}/${each.key}"
+  description = each.value.description
+  type        = each.value.secure ? "SecureString" : "String"
+  key_id      = each.value.secure ? aws_kms_key.ssm.arn : null
   value       = "PLACEHOLDER_SET_BY_OPERATOR"
 
   lifecycle {
@@ -121,122 +141,59 @@ resource "aws_ssm_parameter" "firebase_project_id" {
   }
 }
 
-resource "aws_ssm_parameter" "firebase_service_account" {
-  name        = "/agrawal/${var.environment}/FIREBASE_SERVICE_ACCOUNT_JSON"
-  description = "Firebase Service Account JSON credentials"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.firebase_project_id
+  to   = aws_ssm_parameter.operator["FIREBASE_PROJECT_ID"]
 }
 
-resource "aws_ssm_parameter" "razorpay_key_id" {
-  name        = "/agrawal/${var.environment}/RAZORPAY_KEY_ID"
-  description = "Razorpay Key ID"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.firebase_service_account
+  to   = aws_ssm_parameter.operator["FIREBASE_SERVICE_ACCOUNT_JSON"]
 }
 
-resource "aws_ssm_parameter" "razorpay_key_secret" {
-  name        = "/agrawal/${var.environment}/RAZORPAY_KEY_SECRET"
-  description = "Razorpay Key Secret"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.razorpay_key_id
+  to   = aws_ssm_parameter.operator["RAZORPAY_KEY_ID"]
 }
 
-resource "aws_ssm_parameter" "razorpay_webhook_secret" {
-  name        = "/agrawal/${var.environment}/RAZORPAY_WEBHOOK_SECRET"
-  description = "Razorpay Webhook verification secret"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.razorpay_key_secret
+  to   = aws_ssm_parameter.operator["RAZORPAY_KEY_SECRET"]
 }
 
-resource "aws_ssm_parameter" "payment_hmac_key" {
-  name        = "/agrawal/${var.environment}/PAYMENT_IDENTITY_HMAC_KEY"
-  description = "32 random bytes, base64-encoded, for payment identity HMAC hashing"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.razorpay_webhook_secret
+  to   = aws_ssm_parameter.operator["RAZORPAY_WEBHOOK_SECRET"]
 }
 
-resource "aws_ssm_parameter" "google_cloud_project" {
-  name        = "/agrawal/${var.environment}/GOOGLE_CLOUD_PROJECT"
-  description = "Google Cloud Project ID for Translation / romanizeText"
-  type        = "String"
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.payment_hmac_key
+  to   = aws_ssm_parameter.operator["PAYMENT_IDENTITY_HMAC_KEY"]
 }
 
-resource "aws_ssm_parameter" "google_application_credentials" {
-  name        = "/agrawal/${var.environment}/GOOGLE_APPLICATION_CREDENTIALS_JSON"
-  description = "Google Cloud service account JSON credentials"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.google_cloud_project
+  to   = aws_ssm_parameter.operator["GOOGLE_CLOUD_PROJECT"]
 }
 
-resource "aws_ssm_parameter" "event_pass_signing_keys" {
-  name        = "/agrawal/${var.environment}/EVENT_PASS_SIGNING_KEYS"
-  description = "JSON array of Ed25519 signing keys for Event Passes"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.google_application_credentials
+  to   = aws_ssm_parameter.operator["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
 }
 
-resource "aws_ssm_parameter" "sightengine_api_user" {
-  name        = "/agrawal/${var.environment}/SIGHTENGINE_API_USER"
-  description = "Sightengine API User ID"
-  type        = "String"
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.event_pass_signing_keys
+  to   = aws_ssm_parameter.operator["EVENT_PASS_SIGNING_KEYS"]
 }
 
-resource "aws_ssm_parameter" "sightengine_api_secret" {
-  name        = "/agrawal/${var.environment}/SIGHTENGINE_API_SECRET"
-  description = "Sightengine API Secret"
-  type        = "SecureString"
-  key_id      = aws_kms_key.ssm.arn
-  value       = "PLACEHOLDER_SET_BY_OPERATOR"
+moved {
+  from = aws_ssm_parameter.sightengine_api_user
+  to   = aws_ssm_parameter.operator["SIGHTENGINE_API_USER"]
+}
 
-  lifecycle {
-    ignore_changes = [value]
-  }
+moved {
+  from = aws_ssm_parameter.sightengine_api_secret
+  to   = aws_ssm_parameter.operator["SIGHTENGINE_API_SECRET"]
 }
 
 resource "aws_ssm_parameter" "erasure_self_service" {

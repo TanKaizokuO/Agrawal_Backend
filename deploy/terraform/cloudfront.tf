@@ -15,6 +15,11 @@ resource "aws_cloudfront_origin_access_control" "web_oac" {
   signing_protocol                  = "sigv4"
 }
 
+# AWS managed cache policy, looked up by name rather than a hardcoded ID.
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
 resource "aws_cloudfront_response_headers_policy" "security_headers" {
   name    = "agrawal-${var.environment}-security-headers"
   comment = "Security headers for Agrawal Samaj web and API surfaces"
@@ -64,8 +69,7 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD"]
 
-    # AWS Managed CachingOptimized policy
-    cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
     compress                   = true
   }
