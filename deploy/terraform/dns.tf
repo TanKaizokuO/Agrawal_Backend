@@ -55,7 +55,7 @@ resource "aws_route53_record" "register" {
 resource "aws_route53_record" "api" {
   count   = var.route53_zone_id != "" ? 1 : 0
   zone_id = var.route53_zone_id
-  name    = var.environment == "staging" ? "staging-api.${var.domain_name}" : "api.${var.domain_name}"
+  name    = local.api_host
   type    = "A"
   ttl     = 300
   records = [aws_eip.api_eip.public_ip]

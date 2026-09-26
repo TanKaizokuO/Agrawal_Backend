@@ -87,7 +87,7 @@ resource "aws_ssm_parameter" "web_origins" {
   name        = "/agrawal/${var.environment}/WEB_ORIGINS"
   description = "Allowed web origins for CORS and CSRF checks"
   type        = "String"
-  value       = "https://${var.domain_name},https://register.${var.domain_name},https://api.${var.domain_name}"
+  value       = join(",", local.web_origins)
 
   tags = {
     Environment = var.environment
