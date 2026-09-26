@@ -148,13 +148,10 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.ec2.id]
   }
 
-  egress {
-    description = "No outbound traffic permitted from database tier"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # No outbound traffic from the database tier. An explicit empty list makes
+  # Terraform remove AWS's default allow-all egress rule; omitting the argument
+  # would leave that rule unmanaged.
+  egress = []
 
   tags = {
     Name = "agrawal-${var.environment}-rds-sg"
