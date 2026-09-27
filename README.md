@@ -107,6 +107,8 @@ npm run lint
 # DATABASE_* URLs) naming a test database; the migration role needs CREATEDB.
 # Each test file creates and drops its own temporary database. TEST_APP_DATABASE_URL,
 # when set, is redirected to that same temporary database for app-role checks.
+# URLs exported in the shell win over .env, and the setup refuses any host other
+# than localhost/127.0.0.1/::1/postgres unless ALLOW_REMOTE_TEST_DB=1.
 npm test
 
 # Generate OpenAPI contract (openapi/v1.yaml & openapi.json)
