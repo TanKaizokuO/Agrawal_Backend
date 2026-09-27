@@ -20,6 +20,6 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "prisma/**/*.ts", "prisma.config.ts", "test/**/*.ts", "vitest.config.ts"],
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "prisma.config.ts", "scripts/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
   "exclude": ["dist", "node_modules"]
 }

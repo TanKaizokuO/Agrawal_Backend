@@ -181,7 +181,7 @@ async function createDirectoryFixtures(database: Database): Promise<void> {
       {
         id: FAMILY_MEMBER_ID,
         phoneE164: "+919876543202",
-        nameEn: "Family Member",
+        nameEn: "Kavya Relative",
         consentDirectory: true,
         consentBloodGroup: true,
         consentPhoto: true,
@@ -196,7 +196,7 @@ async function createDirectoryFixtures(database: Database): Promise<void> {
       {
         id: OUTSIDE_MEMBER_ID,
         phoneE164: "+919876543211",
-        nameEn: "Outside Member",
+        nameEn: "Rohan Stranger",
         consentDirectory: true,
         consentBloodGroup: true,
         consentPhoto: true,

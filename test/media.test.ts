@@ -312,8 +312,10 @@ describe("Media visibility, ownership and cleanup", () => {
       await service.deleteAllForMember(tx, MEMBER_ID);
     });
     expect(await database.image.count({ where: { ownerMemberId: MEMBER_ID } })).toBe(0);
+    // One delete for the replaced object, one for the erased replacement; erasure
+    // skips images that replacement already removed and queued.
     const deleteJobs = jobs.sent.filter((job) => job.name === JOB_NAMES.deleteObject);
-    expect(deleteJobs).toHaveLength(3);
+    expect(deleteJobs).toHaveLength(2);
     for (const job of deleteJobs) {
       const key = deleteJobKey(job.payload);
       expect(key).not.toBeNull();

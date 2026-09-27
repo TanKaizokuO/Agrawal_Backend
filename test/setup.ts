@@ -30,6 +30,9 @@ let database: Database | undefined;
 let testDatabaseCreated = false;
 let adminPool: Pool | undefined;
 let maintenancePool: Pool | undefined;
+// Resolve when each admin pool connection's socket has closed; see
+// releaseTestDatabaseResources.
+const adminConnectionsClosed: Promise<void>[] = [];
 
 type TestDatabaseUrlName = "DATABASE_URL" | "DATABASE_MIGRATION_URL" | "TEST_APP_DATABASE_URL";
 
@@ -96,6 +99,10 @@ async function releaseTestDatabaseResources(): Promise<void> {
   adminPool = undefined;
   try {
     await currentAdminPool?.end();
+    // Pool.end() resolves before the sockets close. Dropping the database
+    // WITH (FORCE) while one is still closing terminates it with 57P01, which
+    // surfaces as an unhandled error, so wait for every socket first.
+    await Promise.all(adminConnectionsClosed);
   } finally {
     try {
       await dropTestDatabase();
@@ -185,6 +192,9 @@ beforeAll(async () => {
     );
     testDatabaseCreated = true;
     adminPool = new Pool({ connectionString: testMigrationDatabaseUrl });
+    adminPool.on("connect", (client) => {
+      adminConnectionsClosed.push(new Promise((resolve) => client.once("end", () => { resolve(); })));
+    });
     await migrateFreshSchema(testMigrationDatabaseUrl);
     database = createPrismaClient(testRuntimeDatabaseUrl);
   } catch (error) {
