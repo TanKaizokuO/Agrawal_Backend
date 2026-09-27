@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
@@ -8,6 +8,12 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import { Pool } from "pg";
 import { createPrismaClient, type Database } from "../src/db.js";
+import { assertLocalTestDatabaseUrl } from "./test-database-guard.js";
+
+// Remember what the shell exported before .env fills the gaps, so a TEST_* URL
+// from .env cannot shadow a DATABASE_* URL the shell set explicitly.
+const shellEnvNames = new Set(Object.keys(process.env));
+loadDotenv({ quiet: true });
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -47,7 +53,8 @@ function requireTestDatabaseUrl(name: TestDatabaseUrlName): string {
       : name === "DATABASE_MIGRATION_URL"
         ? "TEST_DATABASE_MIGRATION_URL"
         : name;
-  const value = process.env[testName] ?? process.env[name];
+  const shellName = [testName, name].find((key) => shellEnvNames.has(key) && process.env[key]);
+  const value = shellName ? process.env[shellName] : (process.env[testName] ?? process.env[name]);
   if (!value) {
     const configuredNames = testName === name ? name : `${testName} or ${name}`;
     throw new Error(`${configuredNames} is required for the real-Postgres test setup.`);
@@ -69,6 +76,7 @@ function requireTestDatabaseUrl(name: TestDatabaseUrlName): string {
     throw new Error(`${name} must point to a test database, not '${databaseName}'.`);
   }
 
+  assertLocalTestDatabaseUrl(name, value);
   return value;
 }
 
