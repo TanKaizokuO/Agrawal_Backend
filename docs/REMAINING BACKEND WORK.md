@@ -10,19 +10,17 @@ A reachable instance was previously verified: AWS RDS PostgreSQL 18.3 at `databa
 
 Connection-string constraint: the repo's `pg` v8 maps `sslmode=require` to full certificate verification, so URLs must use `sslmode=verify-full&sslrootcert=<absolute path to global-bundle.pem>`.
 
-Engine version: PostgreSQL 18 is the project version (ADR-0029, 23 September 2026), matching this 18.3 instance; CI and local compose use `postgres:18-alpine`. On 27 September 2026, Prisma 7.10 and all 7 migrations applied to a local PostgreSQL 18.6 (`postgres:18-alpine`). They are not yet verified on the RDS 18.3 instance; the checks below do that.
+Engine version: PostgreSQL 18 is the project version (ADR-0029, 23 September 2026), matching this 18.3 instance; CI and local compose use `postgres:18-alpine`. On 27 September 2026, Prisma 7.10 and all 7 migrations applied to a local PostgreSQL 18.6 (`postgres:18-alpine`). On 27 September 2026, `prisma migrate status` on the RDS `agrawal_dev` database showed all 7 migrations applied, through `20260926000000_payment_refund_attempts` (this includes `20260925000050_blood_sos_tier_zero`). The checks below are still open.
 
 Remaining checks:
 
 1. Provision the real roles: create the `agrawal_dev` database, install `pg_trgm`/`citext`/`unaccent`, create the least-privilege `agrawal_app` role with restricted-schema grants, then repoint `DATABASE_URL` (app role) and `DATABASE_MIGRATION_URL` (migration-owner role) away from the master credentials.
-2. Apply the 7 migrations in `Agrawal_Backend/prisma/migrations/` to an empty database.
-3. Run `npm run test` in `Agrawal_Backend/` against the isolated test database.
-4. Verify the application role can use normal public tables and insert required restricted retention rows. The app-role tests in `test/retention.test.ts` cover part of this, but they stay skipped when `TEST_APP_DATABASE_URL` is set (27 September 2026, PR #55).
-5. Verify the application role cannot select restricted payment data or update/delete `processing_record`.
-6. Exercise every raw SQL trigger, partial unique index, immutable field, succession transaction, webhook replay, and erasure-retention path.
-7. Confirm all 13 recurring pg-boss schedules exist once and execute successfully.
+2. Verify the application role can use normal public tables and insert required restricted retention rows. The app-role tests in `test/retention.test.ts` cover part of this, but they stay skipped unless `TEST_APP_DATABASE_URL` is set (27 September 2026, PR #55).
+3. Verify the application role cannot select restricted payment data or update/delete `processing_record`.
+4. Exercise every raw SQL trigger, partial unique index, immutable field, succession transaction, webhook replay, and erasure-retention path.
+5. Confirm all 13 recurring pg-boss schedules exist once and execute successfully.
 
-Local verification status (27 September 2026): on branch `fix/verify-main-issues` (PR #55), `npm run test` against a local `postgres:18-alpine` (PostgreSQL 18.6) passes 28 test files (139 passed, 4 skipped, 0 failed). The 4 skipped tests are the app-role tests in `test/retention.test.ts`. Each run creates and drops its own `test_<pid>_<uuid>` database (`test/setup.ts`), so the test connection role needs the `CREATEDB` privilege.
+Local verification status (27 September 2026): on `main` at 9aa8e06, `npm run test` against a local `postgres:18-alpine` (PostgreSQL 18.6) passes 29 test files and skips 1 (145 passed, 4 skipped, 0 failed). The 4 skipped tests are the app-role tests in `test/retention.test.ts`. Each run creates and drops its own `test_<pid>_<uuid>` database (`test/setup.ts`), so the test connection role needs the `CREATEDB` privilege. Since 9aa8e06 (PR #56), the test setup refuses a database host that is not `localhost`, `127.0.0.1`, `::1` or `postgres` (`test/test-database-guard.ts`). A database URL that you export in the shell has priority over a `TEST_DATABASE_*` value in `.env`.
 
 ## 2. Operator facts required before staging
 
@@ -93,11 +91,12 @@ Required infrastructure:
 - DNS records and TLS for `staging-api.<domain>`.
 - RDS automated backups/PITR and a restore target.
 
-Terraform definitions for the VPC, RDS, S3, ECR, EC2, KMS/SSM, DNS, and CloudFront resources are in `Agrawal_Backend/deploy/terraform/` on branch `fix/verify-main-issues` (3f27538, PR #55, not merged). The stack uses OpenTofu. `tofu validate` and `tofu fmt -check` pass (27 September 2026). The stack is not applied, and `tofu plan` needs AWS credentials. Open items:
+Terraform definitions for the VPC, RDS, S3, ECR, EC2, KMS/SSM, DNS, and CloudFront resources are in `Agrawal_Backend/deploy/terraform/` on `main` (2961598, PR #55, merged 27 September 2026). The stack uses OpenTofu. `tofu validate` and `tofu fmt -check` pass (27 September 2026). The stack is not applied, and `tofu plan` needs AWS credentials. Open items:
 
-- Merge PR #55. Then run `tofu plan` for each environment, with one state for each environment (`deploy/terraform/versions.tf`).
+- Run `tofu plan` for each environment, with one state for each environment (`deploy/terraform/versions.tf`). No plan has run.
 - Before the first apply to an existing stack, move each ECR repository and the apex, `www`, and `register` records into the state of the correct environment (cb6a9e5, 539d11c).
 - Decide the hosting model. `deploy/README.md` describes one shared EC2 host and one RDS instance with `agrawal_staging` and `agrawal_prod`. `deploy/terraform/` builds one full stack for each environment with the database `agrawal_<environment>`. `.github/workflows/deploy.yml` deploys production with PM2 and nginx, not Docker and Caddy (PR #55).
+- Link `deploy/rds-bootstrap.sql` and `deploy/restore-rehearsal.md` from `deploy/README.md`. Both came to `main` in a6daaa1 (PR #57), but no document links to them.
 
 GitHub repository configuration required by this repository's API workflow (`.github/workflows/api.yml`):
 
@@ -110,6 +109,8 @@ GitHub repository configuration required by this repository's API workflow (`.gi
 - `AWS_REGION` repository variable, normally `ap-south-1`
 
 Prefer GitHub OIDC and a least-privilege deploy role over long-lived AWS access keys before production.
+
+The `Deploy to Staging (AWS SSM)` job in `.github/workflows/api.yml` fails at job set-up, because GitHub cannot find `aws-actions/amazon-ecr-login@v4` (the latest tag is `v2.1.7`). This failure occurs on each push to `main` on 27 September 2026 (2961598, a6daaa1, 9aa8e06). The build, lint, and test job passes. Change the action version in the staging and production jobs.
 
 ### Google Cloud Translation
 
