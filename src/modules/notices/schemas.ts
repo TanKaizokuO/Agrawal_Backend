@@ -112,7 +112,11 @@ export const PaginationQuery = z.object({
 export type PaginationQueryInput = z.infer<typeof PaginationQuery>;
 
 export const SuspensionQuery = z.object({
-  active: z.coerce.boolean().default(true),
+  // z.coerce.boolean() would read the query string "false" as true.
+  active: z.preprocess(
+    (value) => (value === "true" ? true : value === "false" ? false : value),
+    z.boolean().default(true),
+  ),
   cursor: Cursor,
   limit: Limit,
 });

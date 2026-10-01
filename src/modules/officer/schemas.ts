@@ -149,7 +149,12 @@ export type NomineeReadInput = z.infer<typeof NomineeReadBody>;
 export const UnarchiveParams = z.object({ memberId: MemberId });
 
 export const SuspensionQuery = z.object({
-  active: z.coerce.boolean().default(true),
+  // z.coerce.boolean() would read the query string "false" as true. Routes
+  // re-parse the validated query, so an already-parsed boolean must pass too.
+  active: z.preprocess(
+    (value) => (value === "true" ? true : value === "false" ? false : value),
+    z.boolean().default(true),
+  ),
   cursor: Cursor,
   limit: Limit,
 });

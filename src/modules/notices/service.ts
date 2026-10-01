@@ -323,7 +323,7 @@ export class NoticesService {
       },
       orderBy: { publishedAt: "desc" },
       take: take + 1,
-      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor } }),
+      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor }, skip: 1 }),
     });
 
     const hasMore = notices.length > take;
@@ -782,7 +782,7 @@ export class NoticesService {
       },
       orderBy: { createdAt: "desc" },
       take: take + 1,
-      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor } }),
+      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor }, skip: 1 }),
     });
 
     const hasMore = notices.length > take;
@@ -975,7 +975,7 @@ export class NoticesService {
       where: { familyId: memberFamily.familyId },
       orderBy: { createdAt: "desc" },
       take: take + 1,
-      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor } }),
+      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor }, skip: 1 }),
     });
 
     const hasMore = requests.length > take;
@@ -1007,7 +1007,7 @@ export class NoticesService {
       where,
       orderBy: { startsAt: "desc" },
       take: take + 1,
-      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor } }),
+      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor }, skip: 1 }),
     });
 
     const hasMore = rows.length > take;
@@ -1117,7 +1117,7 @@ export class NoticesService {
       where: { status: whereStatus },
       orderBy: { createdAt: "desc" },
       take: take + 1,
-      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor } }),
+      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor }, skip: 1 }),
     });
 
     const hasMore = rows.length > take;
@@ -1194,7 +1194,7 @@ export class NoticesService {
       where: { targetType: query.target },
       orderBy: { createdAt: "desc" },
       take: take + 1,
-      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor } }),
+      ...(query.cursor === undefined ? {} : { cursor: { id: query.cursor }, skip: 1 }),
     });
 
     const hasMore = reports.length > take;

@@ -1477,6 +1477,35 @@ describe("Notices Module Behavioral Specifications", () => {
     expect(responseBody<ErrorResponseBody>(res).error.code).toBe("POSTING_SUSPENDED");
   });
 
+  it("officer suspension pages continue after the cursor row instead of repeating it", async () => {
+    const ctx = createTestContext();
+    const startsAt = ctx.clock.now().getTime();
+    for (let index = 0; index < 3; index += 1) {
+      await ctx.db.suspension.create({
+        data: {
+          id: crypto.randomUUID(),
+          memberId: `member-${String(index)}`,
+          reason: "REPORTS",
+          activeNoticeId: null,
+          startsAt: new Date(startsAt - index * 60_000),
+          endsAt: new Date(startsAt + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+    }
+
+    const first = await ctx.service.listSuspensionsForOfficer({ active: true, limit: 2 });
+    expect(first.nextCursor).not.toBeNull();
+    const second = await ctx.service.listSuspensionsForOfficer({
+      active: true,
+      limit: 2,
+      cursor: first.nextCursor ?? undefined,
+    });
+
+    const ids = [...first.items, ...second.items].map((row) => row.memberId);
+    expect(ids).toEqual(["member-0", "member-1", "member-2"]);
+    expect(second.nextCursor).toBeNull();
+  });
+
   it("acceptance: audience filters never leak author personal phone number", async () => {
     const ctx = createTestContext();
     const authorId = "018f4b7c-3a15-7f20-9f2c-0123456789aa";

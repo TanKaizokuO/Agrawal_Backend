@@ -38,7 +38,10 @@ const service: OfficerRouteService = {
   changeRole: unreachable,
 };
 
-function testApp(roles: readonly ("OFFICER" | "OPERATOR" | "ORGANISER")[]): Express {
+function testApp(
+  roles: readonly ("OFFICER" | "OPERATOR" | "ORGANISER")[],
+  routeService: OfficerRouteService = service,
+): Express {
   const app = express();
   app.use((request, _response, next) => {
     request.principal = {
@@ -52,7 +55,7 @@ function testApp(roles: readonly ("OFFICER" | "OPERATOR" | "ORGANISER")[]): Expr
     };
     next();
   });
-  app.use(createOfficerRoutes({ service }));
+  app.use(createOfficerRoutes({ service: routeService }));
   app.use(errorMiddleware());
   return app;
 }
@@ -155,5 +158,57 @@ describe("Officer public seam", () => {
       erasureRequestId: requestId,
     });
     expect(eraseCalls).toEqual([{ memberId: targetMemberId, erasureRequestId: requestId }]);
+  });
+
+  it("lists suspension timestamps as ISO strings and strips sensitive keys", async () => {
+    const register: OfficerRegisterPort = {
+      project: () => Promise.resolve(new Map<string, MemberProjection>()),
+      eraseMember: () => Promise.resolve(),
+      readNomineeForOfficer: () => Promise.resolve(null),
+      unarchiveMember: () => Promise.resolve({ successionReverted: false }),
+    };
+    const officer = new OfficerService({
+      db: getTestDatabase(),
+      clock: new FixedClock(new Date("2026-09-20T10:00:00.000Z")),
+      retentionDaysConsentAndLogs: 365,
+      register,
+      suspensions: {
+        list: () => Promise.resolve({
+          items: [{
+            id: "suspension-1",
+            startsAt: new Date("2026-09-19T08:00:00.000Z"),
+            liftedAt: null,
+            phoneE164: "+919876543210",
+            pincode: "110001",
+          }],
+          nextCursor: null,
+        }),
+        lift: () => Promise.resolve(),
+      },
+    });
+
+    const page = await officer.listSuspensions({ active: true, limit: 20 });
+    expect(page.items).toEqual([{
+      id: "suspension-1",
+      startsAt: "2026-09-19T08:00:00.000Z",
+      liftedAt: null,
+      phoneLast4: "***3210",
+    }]);
+  });
+
+  it("reads active=false as the lifted-suspension history, not the active queue", async () => {
+    const seen: unknown[] = [];
+    const app = testApp(["OFFICER"], {
+      ...service,
+      listSuspensions: (input) => {
+        seen.push(input.active);
+        return Promise.resolve({ items: [], nextCursor: null });
+      },
+    });
+
+    await request(app).get("/v1/officer/suspensions?active=false").expect(200);
+    await request(app).get("/v1/officer/suspensions").expect(200);
+    await request(app).get("/v1/officer/suspensions?active=yes").expect(400);
+    expect(seen).toEqual([false, true]);
   });
 });

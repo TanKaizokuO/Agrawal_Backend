@@ -372,10 +372,11 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
             }
           }
         }
+        // Prisma cursors are inclusive (callers pass skip: 1); the fakes below match that.
         const cursor = args?.cursor;
         if (cursor) {
           const idx = results.findIndex((row) => row.id === cursor.id);
-          if (idx !== -1) results = results.slice(idx + 1);
+          if (idx !== -1) results = results.slice(idx);
         }
         if (args?.skip) {
           results = results.slice(args.skip);
@@ -533,7 +534,7 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
         const cursor = args?.cursor;
         if (cursor) {
           const idx = results.findIndex((row) => row.id === cursor.id);
-          if (idx !== -1) results = results.slice(idx + 1);
+          if (idx !== -1) results = results.slice(idx);
         }
         if (args?.skip) results = results.slice(args.skip);
         if (args?.take !== undefined) results = results.slice(0, args.take);
@@ -620,7 +621,7 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
         const cursor = args?.cursor;
         if (cursor) {
           const idx = results.findIndex((row) => row.id === cursor.id);
-          if (idx !== -1) results = results.slice(idx + 1);
+          if (idx !== -1) results = results.slice(idx);
         }
         if (args?.skip) results = results.slice(args.skip);
         if (args?.take !== undefined) results = results.slice(0, args.take);
@@ -685,7 +686,7 @@ export class InMemoryNoticesDatabase implements NoticesDatabase {
         const cursor = args?.cursor;
         if (cursor) {
           const idx = results.findIndex((row) => row.id === cursor.id);
-          if (idx !== -1) results = results.slice(idx + 1);
+          if (idx !== -1) results = results.slice(idx);
         }
         if (args?.skip) results = results.slice(args.skip);
         if (args?.take !== undefined) results = results.slice(0, args.take);

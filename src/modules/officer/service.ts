@@ -350,6 +350,8 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 
 function sanitizeOfficerValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => sanitizeOfficerValue(item));
+  // Dates are objects with no own entries; without this they serialize as `{}`.
+  if (value instanceof Date) return value.toISOString();
   if (!isUnknownRecord(value)) return value;
   const result: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
