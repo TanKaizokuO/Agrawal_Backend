@@ -220,7 +220,7 @@ Withdrawing the directory-listing consent **is** an Erasure request (`CONTEXT.md
 | POST | `/v1/me/erasure` | member | 1 / 2 | See Erasure |
 | GET | `/v1/families/mine` | member | 1 | Family + every Member through FAMILY projection + `photoUrl` |
 | PUT | `/v1/families/mine/photo` | Head | 1 | `{ imageId: string \| null }` |
-| GET | `/v1/directory/members` | member | 2 | Query: `q`, `gotra`, `city`, `state`, `familyPublicId`, cursor. Projections. |
+| GET | `/v1/directory/members` | member | 2 | Query: `q`, `city`, `state`, `familyPublicId`, cursor. Projections. |
 | GET | `/v1/directory/families/:publicId` | member | 2 | Family + Members projected per viewer |
 | GET | `/v1/directory/members/:memberId` | member | 2 | One projection |
 | POST | `/v1/families/mine/invites` | member | 2 | → `{ code, url, expiresAt }`; `url` = `${WEB_BASE_URL}/join/${code}` |
@@ -232,7 +232,7 @@ Withdrawing the directory-listing consent **is** an Erasure request (`CONTEXT.md
 - `q` containing Devanagari: match `name_hi` by trigram similarity, **and** romanize `q` (cached) and match `name_en` / `name_en_search_key`.
 - `q` in Latin: match `name_en` and `name_en_search_key` by trigram similarity (`%` operator, threshold 0.3) or `ILIKE q || '%'`.
 - `q` matching `^AGR-` → exact `familyPublicId`.
-- Filters are exact: `gotra` enum, `state` enum, `city` via `cityKey`.
+- Filters are exact: `state` enum, `city` via `cityKey`.
 - Order: similarity desc, then `nameEn`/`nameHi`. Never search or filter on any field outside the SAMAJ column set — searching by phone or pincode would leak Member-only fields through the result set.
 - Directory search and lookups expose only directory-consenting Members to the wider Samaj. Self and Family viewers retain their own/Family projections; the directory consent does not filter Register projections consumed by other modules.
 - Family directory lookup counts and identifies only visible active Members; an opted-out head's `headMemberId` is omitted for non-Family viewers.

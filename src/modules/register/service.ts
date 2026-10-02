@@ -1400,7 +1400,6 @@ export class RegisterService {
       }
     }
 
-    if (input.gotra !== undefined) filters.push(Prisma.sql`f.gotra = ${input.gotra}`);
     if (input.city !== undefined) filters.push(Prisma.sql`m.city_key = ${computeCityKey(input.city)}`);
     if (input.state !== undefined) filters.push(Prisma.sql`m.state = ${input.state}`);
     if (input.familyPublicId !== undefined) {

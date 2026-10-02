@@ -155,7 +155,6 @@ export const PostErasureBody = z.object({
 
 export const DirectorySearchQuery = z.object({
   q: z.string().max(200).optional(),
-  gotra: z.enum(GOTRAS).optional(),
   city: z.string().max(80).optional(),
   state: z.enum(INDIAN_STATES).optional(),
   familyPublicId: z.string().optional(),

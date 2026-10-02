@@ -1255,9 +1255,6 @@
             "$ref": "#/components/parameters/QueryText"
           },
           {
-            "$ref": "#/components/parameters/GotraQuery"
-          },
-          {
             "$ref": "#/components/parameters/CityQuery"
           },
           {
@@ -4698,14 +4695,6 @@
         "schema": {
           "type": "string",
           "maxLength": 120
-        }
-      },
-      "GotraQuery": {
-        "name": "gotra",
-        "in": "query",
-        "required": false,
-        "schema": {
-          "$ref": "#/components/schemas/Gotra"
         }
       },
       "CityQuery": {
