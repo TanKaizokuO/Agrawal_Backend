@@ -87,6 +87,7 @@ export interface RegistrationMediaPort {
 
 export interface RegistrationConfig {
   readonly registrationPaymentPaise: number;
+  readonly registrationPaymentRequired: boolean;
   readonly registrationAbandonAfterHours: number;
   readonly joinRequestExpiryDays: number;
   readonly joinRequestsPendingMaxPerFamily: number;
@@ -313,6 +314,7 @@ export class RegistrationService implements RegistrationIdentityPort {
       throw new AppError("REGISTRATION_NOT_FOUND", 404);
     }
     if (registration.status !== "STARTED") throw new AppError("REGISTRATION_WRONG_STATE", 409);
+    if (!this.config.registrationPaymentRequired) throw new AppError("REGISTRATION_WRONG_STATE", 409);
     const order = await this.payments.createOrder({
       purpose: "REGISTRATION",
       subjectId: registration.id,
@@ -357,10 +359,15 @@ export class RegistrationService implements RegistrationIdentityPort {
     const refund = payment?.refund === null || payment?.refund === undefined
       ? null
       : { status: payment.refund.status };
+    const paymentDeferred =
+      registration.paymentId === null
+      && (registration.status === "AWAITING_HEAD" || registration.status === "COMPLETED");
     return {
       id: registration.id,
       status: registration.status,
       route: registration.route,
+      paymentRequired: this.config.registrationPaymentRequired,
+      paymentDeferred,
       payment: payment === null ? null : this.paymentResponse(payment),
       founding,
       join,
@@ -400,18 +407,21 @@ export class RegistrationService implements RegistrationIdentityPort {
     if (current.status === "COMPLETED" && current.completedMemberId !== null) {
       return this.completedResult(current.completedMemberId);
     }
-    if (current.status !== "PAID") throw new AppError("REGISTRATION_NOT_PAID", 409);
-    if (current.paymentId === null) throw new AppError("REGISTRATION_NOT_PAID", 409);
-
-    const payment = await this.payments.getView(current.paymentId);
-    if (payment.purpose !== "REGISTRATION" || payment.status !== "CAPTURED") {
+    let paymentId: string | null = null;
+    if (current.status === "PAID" && current.paymentId !== null) {
+      const payment = await this.payments.getView(current.paymentId);
+      if (payment.purpose !== "REGISTRATION" || payment.status !== "CAPTURED") {
+        throw new AppError("REGISTRATION_NOT_PAID", 409);
+      }
+      paymentId = current.paymentId;
+    } else if (!this.isPilotStartedWithoutPayment(current)) {
       throw new AppError("REGISTRATION_NOT_PAID", 409);
     }
     const prepared = await this.prepareProfile(parsed, phoneE164);
     if (parsed.route === "JOIN") {
-      return this.submitJoin(current.id, current.paymentId, prepared, parsed);
+      return this.submitJoin(current.id, paymentId, prepared, parsed);
     }
-    return this.submitFounding(current.id, current.paymentId, prepared, parsed);
+    return this.submitFounding(current.id, paymentId, prepared, parsed);
   }
 
   async cancel(registrationId: string, phoneE164: string): Promise<{ status: "ABANDONED" | "CANCELLED" }> {
@@ -468,7 +478,6 @@ export class RegistrationService implements RegistrationIdentityPort {
         registration === null
         || registration.status !== "AWAITING_HEAD"
         || registration.joinFamilyId !== family.familyId
-        || registration.paymentId === null
         || registration.submittedProfile === null
       ) {
         throw new AppError("REGISTRATION_WRONG_STATE", 409);
@@ -480,7 +489,9 @@ export class RegistrationService implements RegistrationIdentityPort {
       const createInput = await this.createMemberInput(registration.phoneE164, profile);
       const created = await this.register.createMemberInFamily(tx, family.familyId, createInput);
       await this.reassignImages(tx, profile, registration.id, created.memberId, family.familyId);
-      await this.payments.markConsumed(tx, registration.paymentId);
+      if (registration.paymentId !== null) {
+        await this.payments.markConsumed(tx, registration.paymentId);
+      }
       await this.identity.promoteToMember(tx, registration.id, created.memberId);
       const completedAt = this.clock.now();
       await tx.registration.update({
@@ -517,7 +528,6 @@ export class RegistrationService implements RegistrationIdentityPort {
         registration === null
         || registration.status !== "AWAITING_HEAD"
         || registration.joinFamilyId !== family.familyId
-        || registration.paymentId === null
       ) {
         throw new AppError("REGISTRATION_WRONG_STATE", 409);
       }
@@ -608,15 +618,15 @@ export class RegistrationService implements RegistrationIdentityPort {
 
   private async submitFounding(
     registrationId: string,
-    paymentId: string,
+    paymentId: string | null,
     profile: PreparedProfile,
     input: SubmitInput,
   ): Promise<FoundingResult> {
     if (input.gotra === undefined) throw new AppError("GOTRA_REQUIRED", 422);
     const gotra = input.gotra;
     const foundingKind = input.route === "INDIVIDUAL" ? "INDIVIDUAL" : "CREATE";
-    const identity = await this.payments.identityOf(paymentId);
-    if (identity.hash !== null && (identity.kind === "VPA" || identity.kind === "CARD")) {
+    const identity = paymentId === null ? null : await this.payments.identityOf(paymentId);
+    if (identity !== null && identity.hash !== null && (identity.kind === "VPA" || identity.kind === "CARD")) {
       const anchor = await this.payments.findHeadAnchor(identity.hash);
       if (anchor !== null) throw new AppError("DUPLICATE_HEAD", 409);
     }
@@ -638,9 +648,10 @@ export class RegistrationService implements RegistrationIdentityPort {
       ) return this.completedResult(registration.completedMemberId);
       if (
         registration === null
-        || registration.status !== "PAID"
         || registration.phoneE164 !== profile.phoneE164
-        || registration.paymentId !== paymentId
+        || (paymentId === null
+          ? !this.isPilotStartedWithoutPayment(registration)
+          : registration.status !== "PAID" || registration.paymentId !== paymentId)
       ) throw new AppError("REGISTRATION_NOT_PAID", 409);
       const publicId = await this.mintFamilyPublicId(tx, input.address.pincode);
       const createInput: CreateFamilyInput = {
@@ -651,8 +662,8 @@ export class RegistrationService implements RegistrationIdentityPort {
         familyPhotoImageId: input.familyPhotoImageId ?? null,
       };
       const created = await this.register.createFamilyWithHead(tx, createInput);
-      if (identity.kind === "VPA" || identity.kind === "CARD") {
-        if (identity.hash === null) throw new AppError("INTERNAL", 500);
+      if (identity !== null && (identity.kind === "VPA" || identity.kind === "CARD")) {
+        if (paymentId === null || identity.hash === null) throw new AppError("INTERNAL", 500);
         await this.payments.createHeadAnchor(tx, {
           identityHash: identity.hash,
           familyId: created.familyId,
@@ -682,7 +693,9 @@ export class RegistrationService implements RegistrationIdentityPort {
         });
       }
       await this.reassignImages(tx, input, registration.id, created.memberId, created.familyId);
-      await this.payments.markConsumed(tx, paymentId);
+      if (paymentId !== null) {
+        await this.payments.markConsumed(tx, paymentId);
+      }
       await this.identity.promoteToMember(tx, registration.id, created.memberId);
       const completedAt = this.clock.now();
       await tx.registration.update({
@@ -708,7 +721,7 @@ export class RegistrationService implements RegistrationIdentityPort {
 
   private async submitJoin(
     registrationId: string,
-    paymentId: string,
+    paymentId: string | null,
     profile: PreparedProfile,
     input: SubmitInput,
   ): Promise<JoiningResult> {
@@ -721,14 +734,15 @@ export class RegistrationService implements RegistrationIdentityPort {
     if (family.status !== "ACTIVE") throw new AppError("FAMILY_NOT_ACCEPTING_JOINS", 409);
 
     const expiresAt = addDays(this.clock.now(), this.config.joinRequestExpiryDays);
-    const identity = await this.payments.identityOf(paymentId);
+    const identity = paymentId === null ? null : await this.payments.identityOf(paymentId);
     const result = await this.db.$transaction(async (tx) => {
       const registration = await this.lockedRegistration(tx, registrationId);
       if (
         registration === null
-        || registration.status !== "PAID"
-        || registration.paymentId !== paymentId
         || registration.phoneE164 !== profile.phoneE164
+        || (paymentId === null
+          ? !this.isPilotStartedWithoutPayment(registration)
+          : registration.status !== "PAID" || registration.paymentId !== paymentId)
       ) throw new AppError("REGISTRATION_NOT_PAID", 409);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`registration-family:${family.id}`}))`;
       const pending = await tx.registration.findMany({
@@ -739,7 +753,8 @@ export class RegistrationService implements RegistrationIdentityPort {
         throw new AppError("FAMILY_NOT_ACCEPTING_JOINS", 409);
       }
       if (
-        identity.hash !== null
+        identity !== null
+        && identity.hash !== null
         && (identity.kind === "VPA" || identity.kind === "CARD")
       ) {
         const anchor = await this.payments.findHeadAnchor(identity.hash);
@@ -903,6 +918,14 @@ export class RegistrationService implements RegistrationIdentityPort {
     if (identity.hash === null || (identity.kind !== "VPA" && identity.kind !== "CARD")) return { allowed: true };
     const anchor = await this.payments.findHeadAnchor(identity.hash);
     return anchor === null ? { allowed: true } : { allowed: false, reason: "DUPLICATE_HEAD" };
+  }
+
+  private isPilotStartedWithoutPayment(
+    registration: Pick<RegistrationRow, "status" | "paymentId">,
+  ): boolean {
+    return !this.config.registrationPaymentRequired
+      && registration.status === "STARTED"
+      && registration.paymentId === null;
   }
 
   private async completedResult(memberId: string): Promise<FoundingResult> {

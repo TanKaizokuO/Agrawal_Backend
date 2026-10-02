@@ -2,6 +2,19 @@ name: Deploy agrawal (Self-hosted, Node.js)
 
 on:
   workflow_dispatch:
+    inputs:
+      registration_payment_required:
+        description: >-
+          Policy for this deployment: configured keeps the Secrets Manager value
+          (or config default true); true requires captured payment; false temporarily
+          permits the unpaid pilot.
+        type: choice
+        required: false
+        default: configured
+        options:
+          - configured
+          - 'true'
+          - 'false'
   push:
     branches:
       - prod
@@ -35,6 +48,8 @@ jobs:
         run: aws sts get-caller-identity
 
       - name: Fetch env from Secrets Manager
+        env:
+          REGISTRATION_PAYMENT_REQUIRED_OVERRIDE: ${{ github.event.inputs.registration_payment_required || '' }}
         run: |
           set -euo pipefail
           umask 077
@@ -45,6 +60,22 @@ jobs:
             --output text \
           | jq 'with_entries(.value |= (if type == "string" then . else tojson end))' > .env.json
           jq -e 'length > 0' .env.json > /dev/null || { echo "::error::secret is empty"; exit 1; }
+
+          case "$REGISTRATION_PAYMENT_REQUIRED_OVERRIDE" in
+            ""|configured)
+              ;;
+            true|false)
+              jq --arg value "$REGISTRATION_PAYMENT_REQUIRED_OVERRIDE" \
+                '.REGISTRATION_PAYMENT_REQUIRED = $value' \
+                .env.json > .env.json.tmp
+              mv .env.json.tmp .env.json
+              ;;
+            *)
+              echo "::error::invalid registration payment policy input"
+              exit 1
+              ;;
+          esac
+
           echo "Loaded $(jq 'length' .env.json) variables"
 
       - name: Install dependencies
@@ -128,4 +159,4 @@ jobs:
 
       - name: Clean workspace secrets
         if: always()
-        run: rm -f .env.json
+        run: rm -f .env.json .env.json.tmp

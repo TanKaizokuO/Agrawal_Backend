@@ -5762,6 +5762,8 @@
           "id",
           "status",
           "route",
+          "paymentRequired",
+          "paymentDeferred",
           "payment",
           "founding",
           "join",
@@ -5784,6 +5786,14 @@
                 "type": "null"
               }
             ]
+          },
+          "paymentRequired": {
+            "type": "boolean",
+            "description": "Current value of the server's REGISTRATION_PAYMENT_REQUIRED policy, which controls whether an unpaid STARTED Registration can be submitted. When false, it may be submitted without payment; when true, it requires an actually captured Registration Payment. This policy can change over time and does not revoke a durable unpaid deferral for an AWAITING_HEAD or COMPLETED Registration."
+          },
+          "paymentDeferred": {
+            "type": "boolean",
+            "description": "True exactly when this Registration is AWAITING_HEAD or COMPLETED and has no payment ID. This durable deferral is derived from the persisted Registration state, so it remains true if the current payment-required policy is later re-enabled. It does not mean a payment was made or captured; no Payment or receipt is fabricated."
           },
           "payment": {
             "oneOf": [

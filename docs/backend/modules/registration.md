@@ -25,8 +25,31 @@ Read `CONTEXT.md` → Applicant, Registration, Registration Payment, Payment Ide
 ```
 
 - A Registration **completes** only in `COMPLETED`. The Applicant becomes a Member in that same transaction and not before (`CONTEXT.md`, Registration).
-- Every non-completing end state — `ABANDONED`, `CANCELLED`, `DECLINED`, `EXPIRED` — refunds a captured Registration Payment and purges the Applicant's submitted profile and uploaded images. Only the Payment and its Refund remain (statutory records).
+- Every non-completing end state — `ABANDONED`, `CANCELLED`, `DECLINED`, `EXPIRED` — refunds a captured Registration Payment if present and purges the Applicant's submitted profile and uploaded images. Only a real Payment and its Refund remain (statutory records).
 - A sign-in reuses an existing `STARTED`, `PAID` or `AWAITING_HEAD` Registration and refreshes `lastActivityAt`. An abandoned Registration is never resumed; a fresh sign-in starts a new Registration when none is live.
+
+### Registration payment policy
+
+`REGISTRATION_PAYMENT_REQUIRED` defaults to `true`. Only an explicit server-side `false` enables the controlled unpaid pilot; client input cannot change policy. In pilot mode, the payment-order endpoint stays disabled and only an unpaid `STARTED` Registration with `paymentId = null` may be submitted. The normal paid path still requires an actual captured Registration Payment.
+
+An unpaid founder still receives a real Member and Family; the Registration retains `paymentId = null`. An unpaid join remains `AWAITING_HEAD` until the real Head approves it, and an existing pilot join remains approvable after the policy is re-enabled. No payment, Payment Identity, receipt or VPA is invented, and payment identity/consumption/refund operations run only when a real payment exists. A pilot founder receives the existing `NO_PAYMENT_IDENTITY` Officer flag.
+
+`GET /v1/registration` reports `paymentRequired` from current server config. `paymentDeferred` is true only for a submitted/completed pilot Registration in `AWAITING_HEAD` or `COMPLETED` with no `paymentId`; it remains true for those durable pilot records after the gate is re-enabled.
+
+### Controlled production pilot deployment
+
+The deployment workflow's [`workflow_dispatch` input](../../../.github/workflows/deploy.yml) controls this policy for one deployment. In GitHub Actions, select **Deploy agrawal (Self-hosted, Node.js)**, choose the verified `main` ref, and set `registration_payment_required` to one of:
+
+- `configured` (the default): keep `REGISTRATION_PAYMENT_REQUIRED` fetched from Secrets Manager; if it is absent, the backend config default is `true`.
+- `false`: temporarily enable unpaid pilot submissions.
+- `true`: restore the captured-payment requirement for new submissions.
+
+Ordinary `push` deployments have no override and retain the fetched server setting (or the `true` config default). The workflow uses its existing self-hosted `prod` runner and server identity to fetch Secrets Manager, validates the selected value, then writes the chosen `true` or `false` as a string into the protected deployment `.env.json`. This matches the backend's boolean parser. The override changes only that deployment's environment; it does not edit Secrets Manager. It never exports or logs secret values, and no workstation AWS credentials are needed.
+
+The pilot is temporary and only changes the registration payment requirement. A new unpaid submission is accepted only while the deployed value is `false`, and only from `STARTED` with `paymentId = null`; the registration payment-order endpoint remains disabled in pilot mode, and this input does not enable charging or otherwise alter payment execution. Founders still get a real Member and Family, while a join stays unpaid in `AWAITING_HEAD` for real Head approval. Records remain truthful: no payment, receipt, payment identity or paid status is fabricated. The fixed OTP `123456` sends no SMS and proves no phone ownership, so this setting does not make registration phone-verified or restrict the public API to a limited app distribution.
+
+To roll back, dispatch the verified `main` ref with `registration_payment_required: true`. This blocks new unpaid submissions without changing existing records; an already-pending unpaid join remains approvable after re-enabling. Because dispatch overrides are deployment-local, keep the Secrets Manager value at `true` as well if ordinary future deployments must retain the required-payment policy; otherwise, a later `configured` deployment restores the stored value (or the default `true` when absent).
+
 
 ## Routes (the three family choices)
 
@@ -96,12 +119,12 @@ Identity calls `registration.openForPhone(tx, phone)` when a phone with no Membe
 
 ## The Registration Payment
 
-- `POST /v1/registration/payment-order` → `payments.createOrder({ purpose: REGISTRATION, subjectId: registration.id, amountPaise: REGISTRATION_PAYMENT_PAISE, payerPhoneE164 })`. Allowed only in `STARTED`. Returns the checkout payload.
+- `POST /v1/registration/payment-order` → `payments.createOrder({ purpose: REGISTRATION, subjectId: registration.id, amountPaise: REGISTRATION_PAYMENT_PAISE, payerPhoneE164 })`. Allowed only in `STARTED` while `REGISTRATION_PAYMENT_REQUIRED=true`; pilot mode rejects the request without creating a payment order.
 - Worker `payments.captured.REGISTRATION`:
   - Registration in `STARTED` → set `PAID`, `paymentId`, touch `lastActivityAt`.
   - Registration in any other state (it was abandoned while the payment was in flight) → `payments.refund(REGISTRATION_ABANDONED)`.
 - Worker `payments.refunded.REGISTRATION` marks the processed refund's Payment consumed. Registration state is unchanged; this stops reconciliation from replaying that Payment's captured event.
-- Every adult pays — founders and joiners alike (`CONTEXT.md`, Registration Payment). This resolves spec conflict R1.
+- Captured Registration Payment remains the normal policy for every adult. The explicit pilot exception is controlled by `REGISTRATION_PAYMENT_REQUIRED=false` as documented under Lifecycle; no client-supplied policy is accepted.
 
 ## Founding (`route: INDIVIDUAL | CREATE`)
 
@@ -109,11 +132,12 @@ Identity calls `registration.openForPhone(tx, phone)` when a phone with no Membe
 
 Submission, in one transaction (`SELECT … FOR UPDATE` on the Registration):
 
-1. Status must be `PAID`, payment `CAPTURED` and not consumed. Else `409 REGISTRATION_NOT_PAID`.
+1. Normally status must be `PAID`, with a captured and unconsumed payment. The sole exception is server-configured pilot mode with status `STARTED` and `paymentId = null`. Else `409 REGISTRATION_NOT_PAID`.
 2. Validate the body (schema below) including `gotra` and the adult check. The phone is the session's phone; the body carries no phone (resolves R5).
-3. Identity: `payments.identityOf(paymentId)`.
+3. On the paid path, inspect `payments.identityOf(paymentId)`.
    - `VPA`/`CARD` with a `HeadAnchor` hit → `409 DUPLICATE_HEAD`. Nothing written.
    - `NONE` → proceed, and raise an Officer flag `NO_PAYMENT_IDENTITY`.
+   In pilot mode, no payment identity exists to inspect; proceed without creating a payment identity and raise the same Officer flag.
 4. Mint the Family ID:
    ```sql
    INSERT INTO family_id_counter (pincode, next_seq) VALUES ($1, 2)
@@ -122,8 +146,8 @@ Submission, in one transaction (`SELECT … FOR UPDATE` on the Registration):
    ```
    `publicId = "AGR-" + pincode + "-" + seq.toString().padStart(5, "0")`. `seq > 99999` → `500` and an operator alert (never wraps). The pincode is the Applicant's address pincode. Gaps appear only on rolled-back transactions; they are harmless and never refilled (invariant 2).
 5. `register.createFamilyWithHead(tx, { publicId, pincodeSnapshot, gotra, head: profile, consents, familyPhotoImageId })`.
-6. `payments.createHeadAnchor(tx, …)` when identity is `VPA`/`CARD`. A unique violation here (two founders paying from one VPA at the same instant) rolls everything back → `409 DUPLICATE_HEAD`.
-7. `payments.markConsumed(tx, paymentId)`.
+6. `payments.createHeadAnchor(tx, …)` when a real payment identity is `VPA`/`CARD`; skipped for unpaid pilot registrations. A unique violation here (two founders paying from one VPA at the same instant) rolls everything back → `409 DUPLICATE_HEAD`.
+7. `payments.markConsumed(tx, paymentId)` only when a real payment exists.
 8. Heuristic flags (never blocking), through `officer.raiseFlag(tx, …)`:
    - `POSSIBLE_DUPLICATE_PERSON` — an ACTIVE or ARCHIVED Member with the same `nameEn` (case-insensitive, trimmed) or `nameHi`, and the same date of birth.
    - `SHARED_ADDRESS` — the Head of a different Family has the same normalized `line1` and pincode.
@@ -141,10 +165,10 @@ Before submission the web checks the Family ID the Applicant typed:
 
 Submission, in one transaction:
 
-1. Status `PAID` (as founding). Family exists, active, under the pending cap. Else `404 FAMILY_NOT_FOUND` / `409 FAMILY_NOT_ACCEPTING_JOINS`.
+1. Normally status must be `PAID`. Pilot mode also permits only `STARTED` with `paymentId = null`. The Family must exist, be active and remain under the pending cap; else `404 FAMILY_NOT_FOUND` / `409 FAMILY_NOT_ACCEPTING_JOINS`.
 2. Validate the body. **`gotra` must be absent** — a joiner inherits the Family's Gotra (invariant 4, resolves R2). **`familyPhotoImageId` must be absent** — the family photo is the Family's, set by the Head (resolves R6).
 3. Store `submittedProfile`, `route = JOIN`, `joinFamilyId`, status `AWAITING_HEAD`, `submittedAt`, `expiresAt = now + JOIN_REQUEST_EXPIRY_DAYS`. Enqueue `registration.expireJoinRequest` with `startAfter: expiresAt`.
-4. Identity flag (never blocking): if the payment's identity hash anchors the Head of a **different** Family → `officer.raiseFlag(JOINER_PAYS_FROM_OTHER_HEAD)`. Paying from the receiving Family's own Head is normal and raises nothing (`CONTEXT.md`, Payment Identity).
+4. Check `JOINER_PAYS_FROM_OTHER_HEAD` only when a real payment identity is available; unpaid pilot joins have no payment identity to inspect.
 
 Response `202`: `{ status: "AWAITING_HEAD", family: { publicId, gotra }, expiresAt }`.
 
@@ -158,7 +182,7 @@ Response `202`: `{ status: "AWAITING_HEAD", family: { publicId, gotra }, expires
 
 The Head sees the joiner's name, father's/husband's name, gender, city and state — enough to recognise a relative, and exactly what a linked Family would see once they are linked (invariant 22). Date of birth, address and blood group are not shown. Route paths live under `/v1/families` but the handlers are this module's.
 
-**Approve**, in one transaction: status `AWAITING_HEAD` and `joinFamilyId` is the Head's Family (else `404`); Family still active; `register.createMemberInFamily(tx, familyId, profile, consents)`; `payments.markConsumed`; `media.reassign`; `identity.promoteToMember`; status `COMPLETED`; purge `submittedProfile`; `register.onFamilyGainedMember(tx, familyId)` (Nominee prompt, see `register.md`).
+**Approve**, in one transaction: status `AWAITING_HEAD` and `joinFamilyId` is the Head's Family (else `404`); Family still active; `register.createMemberInFamily(tx, familyId, profile, consents)`; consume the Registration Payment only if `paymentId` is non-null; `media.reassign`; `identity.promoteToMember`; status `COMPLETED`; purge `submittedProfile`; `register.onFamilyGainedMember(tx, familyId)` (Nominee prompt, see `register.md`). Approval does not re-check the current payment policy, so an existing unpaid pilot join remains approvable after re-enabling the gate.
 
 Stage 1 has no push notifications. The Head learns of a request by signing in to the website; the joiner learns the outcome by signing in again (their principal is now a Member, or `GET /v1/registration` shows `DECLINED`/`EXPIRED` with the refund state). Stage 2 adds pushes to both (`notifications.md`).
 
@@ -166,7 +190,7 @@ Stage 1 has no push notifications. The Head learns of a request by signing in to
 
 | Method | Path | Auth | Effect |
 |---|---|---|---|
-| GET | `/v1/registration` | Applicant | Current Registration: `{ id, status, route, payment: { status, amountPaise } \| null, founding: { allowed, reason? }, join: { family: { publicId, gotra }, expiresAt, declineReason? } \| null, refund: { status } \| null }` |
+| GET | `/v1/registration` | Applicant | Current Registration includes required `paymentRequired` (current server policy) and `paymentDeferred` (true only for `AWAITING_HEAD`/`COMPLETED` with `paymentId = null`); also `{ id, status, route, payment: … \| null, founding: …, join: …, refund: … }` |
 | DELETE | `/v1/registration` | Applicant | From `STARTED`/`PAID` → `ABANDONED`; from `AWAITING_HEAD` → `CANCELLED`; refund if paid |
 
 ## Submission body (`POST /v1/registration/submit`)
@@ -264,7 +288,10 @@ openForPhone(tx, phoneE164: string): Promise<{ registrationId: string }>
 
 ## Required tests
 
-- invariant 1: a founding submit before the payment is captured → `REGISTRATION_NOT_PAID`, no Family row.
+- With `REGISTRATION_PAYMENT_REQUIRED=true`, an unpaid founding submit → `REGISTRATION_NOT_PAID`, no Family row.
+- With the policy false, only an unpaid `STARTED` Registration with `paymentId = null` submits; verify a real Member/Family and Applicant-session promotion with no payment record/calls.
+- A pilot JOIN remains pending with `paymentId = null`, reports `paymentDeferred` before and after re-enabling the gate, and is approved by its real Head; new unpaid submissions are rejected after re-enabling.
+- Cancelled, failed and refunded registrations do not pass the pilot gate; unpaid cancellation/decline never requests a refund.
 - invariant 2: two concurrent foundings in pincode 492001 get `-00001` and `-00002`; no path updates `publicId`.
 - invariant 6: founding paid from a VPA already in `HeadAnchor` → `DUPLICATE_HEAD`; the same Registration can then `JOIN` successfully; if instead abandoned, it is refunded once.
 - Founding with identity `NONE` succeeds and raises `NO_PAYMENT_IDENTITY`.

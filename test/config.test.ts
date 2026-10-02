@@ -32,6 +32,17 @@ describe("loadConfig", () => {
     expect(loadConfig(validEnvironment()).retentionDaysPayments).toBe(2920);
   });
 
+  it("defaults registration payment to required", () => {
+    expect(loadConfig(validEnvironment()).registrationPaymentRequired).toBe(true);
+  });
+
+  it("reads the explicit unpaid registration pilot policy", () => {
+    expect(loadConfig({
+      ...validEnvironment(),
+      REGISTRATION_PAYMENT_REQUIRED: "false",
+    }).registrationPaymentRequired).toBe(false);
+  });
+
   it("requires WEB_ORIGINS instead of using a placeholder origin", () => {
     const environment = validEnvironment();
     environment.APP_ENV = "production";

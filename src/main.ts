@@ -375,6 +375,7 @@ export function createApiRuntime(
     clock,
     config: {
       registrationPaymentPaise: config.registrationPaymentPaise,
+      registrationPaymentRequired: config.registrationPaymentRequired,
       registrationAbandonAfterHours: config.registrationAbandonAfterHours,
       joinRequestExpiryDays: config.joinRequestExpiryDays,
       joinRequestsPendingMaxPerFamily: config.joinRequestsPendingMaxPerFamily,
@@ -538,6 +539,7 @@ export function createApiRuntime(
     reports: createOfficerReportAdapter(noticesService),
     bloodSos: createOfficerBloodSosAdapter(bloodSosService),
   });
+  deferred.officer = officerService;
   const workers: readonly WorkerRegistration[] = [
     ...createIdentityWorkers({ db: createSessionPurgeDatabase(database), rateLimitStore, clock }),
     ...createHttpWorkers(idempotencyStore, clock),

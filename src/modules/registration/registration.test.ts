@@ -2,6 +2,8 @@ import { v7 as uuidv7 } from "uuid";
 import { describe, expect, it } from "vitest";
 import type { JobRuntime } from "../../jobs.js";
 import type { PaymentView } from "../payments/index.js";
+import { IdentityService } from "../identity/index.js";
+import { RegisterService } from "../register/index.js";
 import {
   createRegistrationWorkers,
   REGISTRATION_JOB_NAMES,
@@ -73,7 +75,103 @@ function capturedPayment(paymentId: string): PaymentView {
   };
 }
 
-function harness() {
+function createPersistentRegister(db: RegistrationDeps["db"]): RegisterService {
+  return new RegisterService({
+    db,
+    clock,
+    config: {
+      retentionDaysPayments: 2920,
+      retentionDaysConsentAndLogs: 365,
+      mediaUrlTtlSeconds: 3600,
+      erasureSelfServiceEnabled: false,
+    },
+    pincodeDirectory: { lookup: () => Promise.resolve(null) },
+    objectStore: {
+      put: () => Promise.resolve(),
+      presignGet: () => Promise.resolve(""),
+      delete: () => Promise.resolve(),
+    },
+    jobs,
+    payments: {
+      moveToRestricted: () => Promise.resolve(),
+      releaseHeadAnchor: () => Promise.resolve(),
+    },
+    suspensionResolver: { resolveActiveSuspension: () => Promise.resolve(null) },
+  });
+}
+
+function createPersistentIdentity(
+  db: RegistrationDeps["db"],
+  register: RegisterService,
+): IdentityService {
+  return new IdentityService({
+    db,
+    verifier: {
+      verifyIdToken: (idToken) => Promise.resolve({
+        uid: idToken,
+        phoneE164: "+919876543210",
+        authTime: clock.now(),
+        signInProvider: "phone",
+      }),
+    },
+    registration: { openForPhone: () => Promise.resolve({ registrationId: uuidv7() }) },
+    register,
+    clock,
+    config: { sessionTtlWebDays: 30, sessionTtlMobileDays: 90 },
+    processingRecord: { write: () => Promise.resolve() },
+  });
+}
+
+async function createApplicantSession(
+  db: RegistrationDeps["db"],
+  registrationId: string,
+  phoneE164: string,
+): Promise<string> {
+  const id = uuidv7();
+  await db.session.create({
+    data: {
+      id,
+      tokenHash: `token-${uuidv7()}`,
+      client: "MOBILE",
+      phoneE164,
+      registrationId,
+      createdAt: clock.now(),
+      lastSeenAt: clock.now(),
+      expiresAt: new Date(clock.now().getTime() + 90 * 24 * 60 * 60 * 1000),
+    },
+  });
+  return id;
+}
+
+async function createCapturedPayment(
+  db: RegistrationDeps["db"],
+  payment: Map<string, PaymentView>,
+  registrationId: string,
+  phoneE164: string,
+): Promise<string> {
+  const paymentId = uuidv7();
+  await db.payment.create({
+    data: {
+      id: paymentId,
+      purpose: "REGISTRATION",
+      subjectId: registrationId,
+      payerPhoneE164: phoneE164,
+      amountPaise: 100,
+      status: "CAPTURED",
+      razorpayOrderId: `order-${paymentId}`,
+      razorpayPaymentId: `provider-${paymentId}`,
+      method: "upi",
+      capturedAt: clock.now(),
+    },
+  });
+  payment.set(paymentId, capturedPayment(paymentId));
+  return paymentId;
+}
+
+function harness(options: {
+  readonly registrationPaymentRequired?: boolean;
+  readonly persistMembers?: boolean;
+} = {}) {
   const db = getTestDatabase();
   const payment = new Map<string, PaymentView>();
   const refunds: string[] = [];
@@ -82,6 +180,8 @@ function harness() {
   let familyCreations = 0;
   let memberCreations = 0;
   let promotions = 0;
+  const paymentCalls: string[] = [];
+  const persistentRegister = options.persistMembers ? createPersistentRegister(db) : null;
   const family = {
     familyId: "family-1",
     publicId: "AGR-492001-00001",
@@ -89,7 +189,7 @@ function harness() {
     headMemberId: HEAD_ID,
   };
 
-  const register = {
+  const registerStub = {
     createFamilyWithHead: (): Promise<{ familyId: string; memberId: string }> => {
       familyCreations += 1;
       memberCreations += 1;
@@ -111,43 +211,66 @@ function harness() {
     },
     findPossibleDuplicates: () => Promise.resolve({ samePerson: [], sharedAddressHeads: [] }),
   } satisfies RegistrationDeps["register"];
+  const register: RegistrationDeps["register"] = persistentRegister ?? registerStub;
 
   const payments = {
-    createOrder: () => Promise.resolve({
-      paymentId: "payment-order",
-      razorpayOrderId: "order-1",
-      keyId: "key",
-      amountPaise: 100,
-      currency: "INR" as const,
-      prefill: { contact: "+919876543210" },
-      alreadyPaid: false,
-    }),
-    getView: (paymentId: string) => Promise.resolve(payment.get(paymentId) ?? capturedPayment(paymentId)),
-    getForSubject: () => Promise.resolve(null),
-    identityOf: () => Promise.resolve({ kind: "NONE" as const, hash: null, masked: null }),
-    findHeadAnchor: () => Promise.resolve(null),
-    createHeadAnchor: () => Promise.resolve(),
+    createOrder: () => {
+      paymentCalls.push("createOrder");
+      return Promise.resolve({
+        paymentId: "payment-order",
+        razorpayOrderId: "order-1",
+        keyId: "key",
+        amountPaise: 100,
+        currency: "INR" as const,
+        prefill: { contact: "+919876543210" },
+        alreadyPaid: false,
+      });
+    },
+    getView: (paymentId: string) => {
+      paymentCalls.push("getView");
+      return Promise.resolve(payment.get(paymentId) ?? capturedPayment(paymentId));
+    },
+    getForSubject: () => {
+      paymentCalls.push("getForSubject");
+      return Promise.resolve(null);
+    },
+    identityOf: () => {
+      paymentCalls.push("identityOf");
+      return Promise.resolve({ kind: "NONE" as const, hash: null, masked: null });
+    },
+    findHeadAnchor: () => {
+      paymentCalls.push("findHeadAnchor");
+      return Promise.resolve(null);
+    },
+    createHeadAnchor: () => {
+      paymentCalls.push("createHeadAnchor");
+      return Promise.resolve();
+    },
     markConsumed: async (tx: RegistrationTx, paymentId: string) => {
+      paymentCalls.push("markConsumed");
       await tx.payment.updateMany({
         where: { id: paymentId, consumedAt: null },
         data: { consumedAt: clock.now() },
       });
     },
     refund: (...args: [RegistrationTx, string]): Promise<void> => {
+      paymentCalls.push("refund");
       const paymentId = args[1];
       refunds.push(paymentId);
-      // Mirrors PaymentService.refund: once refunded, the payment is no longer CAPTURED.
       payment.set(paymentId, { ...(payment.get(paymentId) ?? capturedPayment(paymentId)), status: "REFUND_PENDING" });
       return Promise.resolve();
     },
   } satisfies RegistrationDeps["payments"];
 
-  const identity = {
+  const identityStub = {
     promoteToMember: (): Promise<void> => {
       promotions += 1;
       return Promise.resolve();
     },
   } satisfies RegistrationDeps["identity"];
+  const identity: RegistrationDeps["identity"] = persistentRegister === null
+    ? identityStub
+    : createPersistentIdentity(db, persistentRegister);
   const officer = {
     raiseFlag: (...args: [RegistrationTx, { readonly kind: string; readonly subjectType: string; readonly subjectId: string; readonly relatedIds?: readonly string[] }]): Promise<void> => {
       const input = args[1];
@@ -156,11 +279,14 @@ function harness() {
       return Promise.resolve();
     },
   } satisfies RegistrationDeps["officer"];
-  const service = new RegistrationService({
+  const createService = (
+    registrationPaymentRequired = options.registrationPaymentRequired ?? true,
+  ): RegistrationService => new RegistrationService({
     db,
     clock,
     config: {
       registrationPaymentPaise: 100,
+      registrationPaymentRequired,
       registrationAbandonAfterHours: 24,
       joinRequestExpiryDays: 14,
       joinRequestsPendingMaxPerFamily: 10,
@@ -178,6 +304,7 @@ function harness() {
       romanize: (text: string): Promise<string> => Promise.resolve(text),
     },
   });
+  const service = createService();
 
   async function createRegistration(phoneE164: string, status: "STARTED" | "PAID", paymentId?: string): Promise<string> {
     const id = uuidv7();
@@ -208,6 +335,8 @@ function harness() {
     refunds,
     flags,
     detailedFlags,
+    paymentCalls,
+    createService,
     createRegistration,
     get familyCreations() { return familyCreations; },
     get memberCreations() { return memberCreations; },
@@ -236,6 +365,155 @@ describe("Registration public behavior", () => {
       subjectType: "MEMBER",
       subjectId: FOUNDER_ID,
     });
+  });
+
+  it("rejects an unpaid STARTED Registration while payment is required", async () => {
+    const h = harness({ persistMembers: true });
+    const phoneE164 = "+919876543250";
+    const registrationId = await h.createRegistration(phoneE164, "STARTED");
+
+    await expect(h.service.submit(registrationId, phoneE164, profile("CREATE")))
+      .rejects.toMatchObject({ code: "REGISTRATION_NOT_PAID", httpStatus: 409 });
+
+    expect(await h.db.member.count({ where: { phoneE164 } })).toBe(0);
+    expect(await h.db.family.count()).toBe(0);
+    expect(h.paymentCalls).toEqual([]);
+  });
+
+  it("creates a real unpaid pilot founder and promotes the Applicant session without payment calls", async () => {
+    const h = harness({ registrationPaymentRequired: false, persistMembers: true });
+    const phoneE164 = "+919876543251";
+    const registrationId = await h.createRegistration(phoneE164, "STARTED");
+    const sessionId = await createApplicantSession(h.db, registrationId, phoneE164);
+
+    await expect(h.service.createPaymentOrder(registrationId, phoneE164))
+      .rejects.toMatchObject({ code: "REGISTRATION_WRONG_STATE", httpStatus: 409 });
+    const result = await h.service.submit(registrationId, phoneE164, profile("CREATE"));
+
+    if (result.status !== "COMPLETED") throw new Error("Founding Registration did not complete");
+    const member = await h.db.member.findUniqueOrThrow({ where: { id: result.memberId } });
+    const family = await h.db.family.findUniqueOrThrow({ where: { publicId: result.family.publicId } });
+    const familyLink = await h.db.familyLink.findUniqueOrThrow({ where: { memberId: member.id } });
+    const session = await h.db.session.findUniqueOrThrow({ where: { id: sessionId } });
+
+    expect(member).toMatchObject({ phoneE164, status: "ACTIVE" });
+    expect(family).toMatchObject({ headMemberId: member.id, gotra: "GARG", status: "ACTIVE" });
+    expect(familyLink.familyId).toBe(family.id);
+    expect(session).toMatchObject({ memberId: member.id, registrationId: null });
+    expect(await h.db.registration.findUniqueOrThrow({ where: { id: registrationId } }))
+      .toMatchObject({ status: "COMPLETED", paymentId: null, completedMemberId: member.id });
+    await expect(h.service.getCurrent(registrationId, phoneE164))
+      .resolves.toMatchObject({
+        status: "COMPLETED",
+        paymentRequired: false,
+        paymentDeferred: true,
+        payment: null,
+        completedMemberId: member.id,
+      });
+    expect(await h.db.payment.count({ where: { subjectId: registrationId } })).toBe(0);
+    expect(h.paymentCalls).toEqual([]);
+    expect(h.flags).toContain("NO_PAYMENT_IDENTITY");
+  });
+
+  it("restores and approves a no-payment JOIN after payment becomes required again", async () => {
+    const h = harness({ registrationPaymentRequired: false, persistMembers: true });
+    const headPhone = "+919876543252";
+    const headRegistrationId = await h.createRegistration(headPhone, "STARTED");
+    const headPaymentId = await createCapturedPayment(h.db, h.payment, headRegistrationId, headPhone);
+    await h.service.onRegistrationPaymentCaptured(headPaymentId, headRegistrationId);
+    const head = await h.service.submit(headRegistrationId, headPhone, profile("CREATE"));
+    if (head.status !== "COMPLETED") throw new Error("Family Head Registration did not complete");
+
+    const joinerPhone = "+919876543253";
+    const joinerRegistrationId = await h.createRegistration(joinerPhone, "STARTED");
+    const sessionId = await createApplicantSession(h.db, joinerRegistrationId, joinerPhone);
+    const paymentCallsBeforeJoin = [...h.paymentCalls];
+    const pending = await h.service.submit(joinerRegistrationId, joinerPhone, profile("JOIN"));
+
+    expect(pending.status).toBe("AWAITING_HEAD");
+    expect(await h.db.member.count({ where: { phoneE164: joinerPhone } })).toBe(0);
+    expect(await h.db.registration.findUniqueOrThrow({ where: { id: joinerRegistrationId } }))
+      .toMatchObject({ status: "AWAITING_HEAD", paymentId: null, route: "JOIN" });
+    await expect(h.service.getCurrent(joinerRegistrationId, joinerPhone))
+      .resolves.toMatchObject({ paymentRequired: false, paymentDeferred: true, payment: null });
+    expect(h.paymentCalls).toEqual(paymentCallsBeforeJoin);
+
+    const paymentRequiredService = h.createService(true);
+    await expect(paymentRequiredService.getCurrent(joinerRegistrationId, joinerPhone))
+      .resolves.toMatchObject({ paymentRequired: true, paymentDeferred: true, payment: null });
+    const newApplicantPhone = "+919876543254";
+    const newApplicantRegistration = await h.createRegistration(newApplicantPhone, "STARTED");
+    await expect(paymentRequiredService.submit(newApplicantRegistration, newApplicantPhone, profile("CREATE")))
+      .rejects.toMatchObject({ code: "REGISTRATION_NOT_PAID", httpStatus: 409 });
+    expect(await h.db.member.count({ where: { phoneE164: newApplicantPhone } })).toBe(0);
+    const approved = await paymentRequiredService.approveJoin(joinerRegistrationId, head.memberId);
+    const joiner = await h.db.member.findUniqueOrThrow({ where: { phoneE164: joinerPhone } });
+    const headFamily = await h.db.family.findUniqueOrThrow({ where: { publicId: head.family.publicId } });
+    const joinerLink = await h.db.familyLink.findUniqueOrThrow({ where: { memberId: joiner.id } });
+    const session = await h.db.session.findUniqueOrThrow({ where: { id: sessionId } });
+
+    expect(approved.status).toBe("COMPLETED");
+    expect(joinerLink.familyId).toBe(headFamily.id);
+    expect(await h.db.registration.findUniqueOrThrow({ where: { id: joinerRegistrationId } }))
+      .toMatchObject({
+        status: "COMPLETED",
+        paymentId: null,
+        completedMemberId: joiner.id,
+        submittedProfile: null,
+      });
+    expect(session).toMatchObject({ memberId: joiner.id, registrationId: null });
+    await expect(paymentRequiredService.getCurrent(joinerRegistrationId, joinerPhone))
+      .resolves.toMatchObject({ paymentRequired: true, paymentDeferred: true, payment: null });
+    expect(await h.db.payment.count({ where: { subjectId: joinerRegistrationId } })).toBe(0);
+    expect(h.paymentCalls).toEqual(paymentCallsBeforeJoin);
+  });
+
+  it("does not extend the pilot exception to terminal registrations or uncaptured payments", async () => {
+    const h = harness({ registrationPaymentRequired: false, persistMembers: true });
+    const cancelledPhone = "+919876543255";
+    const cancelledId = await h.createRegistration(cancelledPhone, "STARTED");
+    await h.service.cancel(cancelledId, cancelledPhone);
+    await expect(h.service.submit(cancelledId, cancelledPhone, profile("CREATE")))
+      .rejects.toMatchObject({ code: "REGISTRATION_NOT_PAID", httpStatus: 409 });
+
+    for (const [phoneE164, status] of [
+      ["+919876543256", "FAILED"],
+      ["+919876543257", "REFUNDED"],
+    ] as const) {
+      const paymentId = `payment-${status.toLowerCase()}`;
+      const registrationId = await h.createRegistration(phoneE164, "PAID", paymentId);
+      h.payment.set(paymentId, { ...capturedPayment(paymentId), status });
+      await expect(h.service.submit(registrationId, phoneE164, profile("CREATE")))
+        .rejects.toMatchObject({ code: "REGISTRATION_NOT_PAID", httpStatus: 409 });
+    }
+
+    const startedWithPaymentPhone = "+919876543258";
+    const startedWithPaymentId = await h.createRegistration(
+      startedWithPaymentPhone,
+      "STARTED",
+      "payment-not-captured",
+    );
+    await expect(h.service.submit(startedWithPaymentId, startedWithPaymentPhone, profile("CREATE")))
+      .rejects.toMatchObject({ code: "REGISTRATION_NOT_PAID", httpStatus: 409 });
+    expect(await h.db.family.count()).toBe(0);
+  });
+
+  it("does not request refunds when unpaid pilot JOIN requests are cancelled or declined", async () => {
+    const h = harness({ registrationPaymentRequired: false });
+    const cancelledPhone = "+919876543259";
+    const cancelledId = await h.createRegistration(cancelledPhone, "STARTED");
+    const cancelledPending = await h.service.submit(cancelledId, cancelledPhone, profile("JOIN"));
+    expect(cancelledPending.status).toBe("AWAITING_HEAD");
+    await expect(h.service.cancel(cancelledId, cancelledPhone)).resolves.toEqual({ status: "CANCELLED" });
+
+    const declinedPhone = "+919876543260";
+    const declinedId = await h.createRegistration(declinedPhone, "STARTED");
+    const declinedPending = await h.service.submit(declinedId, declinedPhone, profile("JOIN"));
+    expect(declinedPending.status).toBe("AWAITING_HEAD");
+    await expect(h.service.declineJoin(declinedId, HEAD_ID, {})).resolves.toEqual({ status: "DECLINED" });
+
+    expect(h.paymentCalls).toEqual([]);
+    expect(h.refunds).toEqual([]);
   });
 
 

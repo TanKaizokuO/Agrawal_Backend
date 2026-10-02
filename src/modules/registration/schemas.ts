@@ -198,6 +198,8 @@ export const RegistrationResponse = z.object({
   id: z.uuid(),
   status: z.enum(REGISTRATION_STATUSES),
   route: z.enum(REGISTRATION_ROUTES).nullable(),
+  paymentRequired: z.boolean(),
+  paymentDeferred: z.boolean(),
   payment: PaymentStatus.nullable(),
   founding: z.object({ allowed: z.boolean(), reason: z.string().optional() }),
   join: z.object({
