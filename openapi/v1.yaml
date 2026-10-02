@@ -4034,7 +4034,7 @@ components:
           maxLength: 300
     NomineeReadRequest:
       type: object
-      required: [reason, archivalRequestId]
+      required: [reason]
       properties:
         reason:
           type: string
@@ -4055,7 +4055,6 @@ components:
       properties:
         successionReverted:
           type: boolean
-          const: false
     OfficerRefundRequest:
       type: object
       required: [reason]
