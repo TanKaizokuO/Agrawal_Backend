@@ -184,7 +184,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CheckoutOrder'
+                $ref: '#/components/schemas/RegistrationCheckoutOrder'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
@@ -396,7 +396,7 @@ paths:
         - $ref: '#/components/parameters/RegistrationId'
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '200':
+        '201':
           description: Joiner became a Member.
           content:
             application/json:
@@ -3091,18 +3091,39 @@ components:
       enum: [CREATED, CAPTURED, FAILED, REFUND_PENDING, REFUNDED]
     RefundStatus:
       type: string
-      enum: [REQUESTED, PROCESSED, FAILED]
+      enum: [REQUESTED, PROCESSING, PROCESSED, FAILED]
     RefundReason:
       type: string
       enum: [DUPLICATE_HEAD, JOIN_DECLINED, JOIN_EXPIRED, REGISTRATION_CANCELLED, REGISTRATION_ABANDONED, PUBLICATION_FAILED, OFFICER]
     RegistrationPaymentSummary:
       type: object
-      required: [status, amount]
+      required: [paymentId, purpose, status, amountPaise, currency, refund]
       properties:
+        paymentId:
+          type: string
+          minLength: 1
+        purpose:
+          type: string
+          const: REGISTRATION
         status:
           $ref: '#/components/schemas/PaymentStatus'
-        amount:
-          $ref: '#/components/schemas/Money'
+        amountPaise:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+        refund:
+          oneOf:
+            - $ref: '#/components/schemas/PaymentRefundSummary'
+            - type: 'null'
+    PaymentRefundSummary:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: '#/components/schemas/RefundStatus'
+        reason:
+          $ref: '#/components/schemas/RefundReason'
     FoundingEligibility:
       type: object
       required: [allowed]
@@ -3133,9 +3154,15 @@ components:
           oneOf:
             - $ref: '#/components/schemas/RefundReason'
             - type: 'null'
+    RegistrationRefundSummary:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
     RegistrationResponse:
       type: object
-      required: [id, status, route, payment, founding, join, refund]
+      required: [id, status, route, payment, founding, join, refund, completedMemberId]
       properties:
         id:
           $ref: '#/components/schemas/Uuid'
@@ -3157,7 +3184,11 @@ components:
             - type: 'null'
         refund:
           oneOf:
-            - $ref: '#/components/schemas/RefundSummary'
+            - $ref: '#/components/schemas/RegistrationRefundSummary'
+            - type: 'null'
+        completedMemberId:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
             - type: 'null'
     FamilyReference:
       type: object
@@ -3185,6 +3216,29 @@ components:
           type: string
         amount:
           $ref: '#/components/schemas/Money'
+        prefill:
+          $ref: '#/components/schemas/CheckoutPrefill'
+        alreadyPaid:
+          type: boolean
+    RegistrationCheckoutOrder:
+      type: object
+      required: [paymentId, razorpayOrderId, keyId, amountPaise, currency, prefill, alreadyPaid]
+      properties:
+        paymentId:
+          type: string
+          minLength: 1
+        razorpayOrderId:
+          type: string
+          minLength: 1
+        keyId:
+          type: string
+          minLength: 1
+        amountPaise:
+          type: integer
+          exclusiveMinimum: 0
+        currency:
+          type: string
+          const: INR
         prefill:
           $ref: '#/components/schemas/CheckoutPrefill'
         alreadyPaid:
@@ -3305,7 +3359,7 @@ components:
       enum: [REGISTRATION, BUSINESS_LISTING]
     PaymentResponse:
       type: object
-      required: [paymentId, purpose, status, amount, method, capturedAt, refund]
+      required: [paymentId, purpose, status, amountPaise, currency, method, capturedAt, refund]
       properties:
         paymentId:
           $ref: '#/components/schemas/Uuid'
@@ -3313,8 +3367,12 @@ components:
           $ref: '#/components/schemas/PaymentPurpose'
         status:
           $ref: '#/components/schemas/PaymentStatus'
-        amount:
-          $ref: '#/components/schemas/Money'
+        amountPaise:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+          const: INR
         method:
           type: [string, 'null']
         capturedAt:
@@ -3323,7 +3381,7 @@ components:
             - type: 'null'
         refund:
           oneOf:
-            - $ref: '#/components/schemas/RefundSummary'
+            - $ref: '#/components/schemas/PaymentRefundSummary'
             - type: 'null'
     PaymentConfirmRequest:
       type: object
@@ -3713,7 +3771,7 @@ components:
           maxLength: 200
     JoinApprovalResponse:
       type: object
-      required: [status, memberId, family]
+      required: [status, memberId, family, completedAt]
       properties:
         status:
           type: string
@@ -3722,6 +3780,8 @@ components:
           $ref: '#/components/schemas/Uuid'
         family:
           $ref: '#/components/schemas/FamilyReference'
+        completedAt:
+          $ref: '#/components/schemas/Timestamp'
     JoinDeclineResponse:
       type: object
       required: [status, refund]

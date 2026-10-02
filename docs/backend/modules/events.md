@@ -4,6 +4,8 @@ Owns Events, Organisers, Event Passes, gate manifests and scan synchronisation. 
 
 Read `CONTEXT.md` → Event Pass, Organiser, invariants 7, 19 and 23 first. ADR-0013 §10, ADR-0016 §17, ADR-0017 §12.
 
+**Implementation status (2 October 2026):** re-claiming a `MEMBER_CANCELLED` pass below is an approved ADR-0026 requirement, not current behavior. The service still rejects an existing pass row with `PASS_ALREADY_EXISTS`; row reactivation and fresh signing remain open source work in `docs/REMAINING BACKEND WORK.md`.
+
 ## The rules this module exists to keep
 
 - An Event Pass admits one Member to one Event, is non-transferable, is invalid once the Event ends, and verifies at the gate without network (invariant 19).

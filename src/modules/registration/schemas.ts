@@ -229,12 +229,24 @@ export const JoinRequestItem = z.object({
 });
 export const JoinRequestListResponse = z.object({ items: z.array(JoinRequestItem) });
 
-export const SubmitResponse = z.object({
-  status: z.enum(["COMPLETED", "AWAITING_HEAD"]),
-  family: z.object({ publicId: z.string().regex(FAMILY_PUBLIC_ID), gotra: z.enum(GOTRAS) }),
-  completedAt: z.iso.datetime({ offset: true }).optional(),
-  expiresAt: z.iso.datetime({ offset: true }).optional(),
+const SubmitFamily = z.object({
+  publicId: z.string().regex(FAMILY_PUBLIC_ID),
+  gotra: z.enum(GOTRAS),
 });
+
+export const SubmitResponse = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("COMPLETED"),
+    memberId: z.uuid(),
+    family: SubmitFamily,
+    completedAt: z.iso.datetime({ offset: true }),
+  }),
+  z.object({
+    status: z.literal("AWAITING_HEAD"),
+    family: SubmitFamily,
+    expiresAt: z.iso.datetime({ offset: true }),
+  }),
+]);
 
 export const SimpleStatusResponse = z.object({
   status: z.enum(REGISTRATION_STATUSES),

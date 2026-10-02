@@ -21,8 +21,8 @@ Operator Decisions Round 7 (ADR-0026, 21 September 2026) answered this file's fo
 - **Production domain** (was item 3): `agrawal.app`, with `register.` and `api.` subdomains; settles "Agarwal vs Agrawal" in favour of "Agrawal" (§3–4).
 - **`RETENTION_DAYS_PAYMENTS`** (was item 5): 2920 days — eight years, covering GST's 72 months and the income-tax reassessment window (§5). `.env.example` and `architecture.md` updated.
 - **Family photo audience** (was item 6): closed default confirmed — Member and their own Family see it; the wider Samaj never does (§6).
-- **Blood SOS app-only fields** (was item 8): `urgency`, `patientRelation` and `hospitalArea` are accepted by the API; urgency is display-only, with no effect on widening until a decision amends ADR-0025 (§7).
+- **Blood SOS app-only fields** (was item 8): the Operator approved API support for `urgency`, `patientRelation` and `hospitalArea`; urgency remains display-only (§7). **Implementation open:** current source does not accept, store, or return these fields.
 - **Blood SOS pincode-failure fallback** (was item 9): the requester's own city, district and state, as ADR-0025 §6 specifies (§8).
 - **Blood SOS tuning** (was item 10): `DONOR_COOLDOWN_DAYS` stays 90 flat; `DONOR_DAILY_ALERT_CAP` (3) and `SOS_DENSITY_FLOOR` (5) stay placeholders, retuned after real usage (§9).
-- **Event Pass re-claim** (was item 11): allowed — a `MEMBER_CANCELLED` pass is reactivated with a fresh signature; Officer/erasure/archival revocations stay final (§10).
-- **Per-owner media quota** (was in `REMAINING BACKEND WORK.md` §2): 30 live images per owner, count-based (§11).
+- **Event Pass re-claim** (was item 11): allowed by decision — a `MEMBER_CANCELLED` pass must reactivate with a fresh signature; Officer/erasure/archival revocations stay final (§10). **Implementation open:** the service still rejects an existing pass row.
+- **Per-owner media quota** (was in `REMAINING BACKEND WORK.md` §2): approved limit of 30 live images per owner, count-based (§11). **Implementation open:** upload quota enforcement and boundary tests are absent.

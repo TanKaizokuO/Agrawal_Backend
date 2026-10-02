@@ -4,6 +4,8 @@ Owns uploaded images: storage in S3, visibility, Officer removal, and (from M12)
 
 Read `CONTEXT.md` invariant 11 (as rewritten on 18 September) and the Officer entry first.
 
+**Implementation status (2 October 2026):** the 30-live-images per-owner quota and `MEDIA_QUOTA_EXCEEDED` response below are approved ADR-0026 requirements, not implemented enforcement. The current service does not count live owner images before upload. Quota enforcement and boundary tests remain open source work in `docs/REMAINING BACKEND WORK.md`.
+
 ## The rule this module exists to keep
 
 Until screening ships, an image is accepted **unscreened**, is visible to **its uploader only**, and the Officer removes an explicit one after the fact. Once `IMAGE_SCREENING_ENABLED=true`, every new image is screened at upload and refused if explicit **or if the check cannot complete** (fail-closed), and only `APPROVED` images are visible to anyone other than the uploader. Culturally ordinary imagery is not treated as explicit (ADR-0006).

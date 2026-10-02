@@ -4,6 +4,8 @@ Owns urgent blood donor requests: raising, widening, matching, Donor Reach and f
 
 Read `CONTEXT.md` → Blood SOS, Donor, Donor Reach, invariants 15 and 20 first. ADR-0011 (density floor), ADR-0025 (place-based widening). ADR-0025 replaces the km radius ladder of ADR-0004 §5 and ADR-0006 §4 with widening by place: city → district → state. There is no GPS and no distance.
 
+**Implementation status (2 October 2026):** ADR-0026's `urgency`, `patientRelation`, and `hospitalArea` fields below are approved requirements, not implemented API fields. The current create schema, storage, and response mappings do not support them; clients must omit them until the implementation and contract tests land. Track the source work in `docs/REMAINING BACKEND WORK.md`.
+
 ## The rule this module exists to keep
 
 A Blood SOS always reports its Donor Reach to the requester, and widens beyond blood-group matching rather than notifying almost nobody (invariant 15). Blood Group is never displayed to anyone (invariant 20): it is used only for matching inside this module; no endpoint returns it.

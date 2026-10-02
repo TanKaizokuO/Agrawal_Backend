@@ -217,15 +217,20 @@ Every `POST` that creates a resource or moves money accepts an `Idempotency-Key`
 
 | Job | Schedule | Module |
 |---|---|---|
+| `bloodSos.processPending` | every minute | blood SOS |
+| `media.screenBacklog` | every 5 min | media |
 | `payments.reconcile` | every 10 min | payments |
 | `registration.abandonIdle` | every 15 min | registration |
+| `noticeboards.endSuspensions` | every 15 min (Stage 2) | noticeboards |
 | `registration.expireJoinRequests` | hourly | registration |
+| `noticeboards.expireListings` | hourly (Stage 2) | noticeboards |
+| `noticeboards.escalateArchivals` | hourly (Stage 2) | noticeboards |
+| `media.gcOrphans` | daily 02:00 | media |
+| `media.purgeQuarantine` | daily 02:15 | media |
 | `register.purgeRestricted` | daily 03:00 | register |
+| `officer.purgeProcessingRecords` | daily 03:15 | officer |
 | `identity.purgeSessionsAndBuckets` | daily 03:30 | identity |
 | `http.purgeIdempotency` | daily 03:45 | (shared) |
-| `noticeboards.expireListings` | hourly (Stage 2) | noticeboards |
-| `noticeboards.endSuspensions` | every 15 min (Stage 2) | noticeboards |
-| `noticeboards.escalateArchivals` | hourly (Stage 2) | noticeboards |
 
 Timed per-entity work (a Blood SOS widening step, a join request's expiry) uses `send` with `startAfter`, not a cron scan, and the cron scan exists as a backstop.
 
@@ -286,15 +291,15 @@ pino with a redaction list covering: `req.headers.authorization`, `req.headers.c
 
 ## Security checklist (M13, and reviewed at M5)
 
-- [ ] Every route has a zod schema for params, query and body, and an auth requirement declared explicitly (`public`, `principal`, `member`, `role(X)`).
-- [ ] Every Member-facing response built through a Register projection; a grep for `select:` on `member` outside `modules/register` returns nothing.
-- [ ] CSRF origin check on every cookie-authenticated unsafe method; tested.
-- [ ] Rate limits on session exchange, payment orders, join submissions, Family ID checks, romanization, uploads, reports.
-- [ ] Webhook signature verified over the raw body before any parsing; replayed event IDs ignored.
-- [ ] No client-supplied amount, payment status or payment identity is ever trusted.
-- [ ] Uploads: size cap, magic-byte check, sharp re-encode, EXIF stripped.
-- [ ] Processing Record grants and triggers verified by a test that attempts `UPDATE` as the app role and expects failure.
-- [ ] Log redaction verified by a test that logs a registration request and asserts no phone, DOB or address in output.
-- [ ] Dependencies pinned; `npm audit --omit=dev` reviewed.
-- [ ] Session cookie `HttpOnly; Secure; SameSite=Lax; Path=/`; tokens stored hashed.
-- [ ] Officer and Operator routes require the role on the server; the web hiding a button is not access control.
+- [ ] Every route has a Zod schema for params, query and body, and an auth requirement explicitly declared (`public`, `principal`, `member`, `role(X)`). *(Open: `test/openapi.test.ts` confirms method/path coverage for 95 runtime operations, not that every handler installs runtime `validate()` or declares public access; the route audit still finds inline parsing and public routes without an explicit `public` declaration.)*
+- [x] Every Member-facing response uses a Register projection; Member visibility rules are centralized in Register. *(Source audit found narrow non-response Member reads outside Register: reauthentication phone matching in `src/main.ts`, notification language in `src/adapters/governance.ts`, member-ID candidates in `src/adapters/member-lookup.ts`, and an existence check in `src/adapters/notices-db.ts`. Officer lookup projects candidate IDs through Register before returning them. Tests: `test/register-policy.test.ts` covers Invariants 16, 20, 22; `test/register-directory.test.ts` exercises directory responses. The former claim that there are no Member selects outside Register was false.)*
+- [x] CSRF origin check on every cookie-authenticated unsafe method; tested. *(Verified: `src/http/csrf.ts` is mounted globally in `src/app.ts`; `test/foundation.test.ts` accepts an exact allowed Origin and rejects missing or near-match Origins with 403.)*
+- [ ] Rate limits on session exchange, payment orders, join submissions, Family ID checks, romanization, uploads and reports. *(The prior `/v1/auth/session` gap claim was false: `IdentityService.createSession` applies persistent IP and phone limits via the store wired in `src/main.ts`; `test/identity-auth.test.ts` asserts both boundaries, and `test/rate-limit.test.ts` covers middleware boundary/key behavior. The named registration, romanization, upload and report paths have route limits. Still open: the Business Listing payment-order and renewal routes in `src/modules/notices/routes.ts` do not attach a rate limit, so the broad payment-orders criterion is not complete.)*
+- [x] Verify webhook signatures over the raw body before parsing and deduplicate replayed event IDs. *(`src/app.ts` mounts the webhook before `express.json()`; `PaymentWebhookService.receive` verifies HMAC-SHA-256 over raw bytes before JSON parsing. `test/payment-locks.test.ts` proves invalid signatures are not persisted and a valid replay does not enqueue a second job. This source contract is verified even though user-facing payment activation and live Razorpay verification remain deferred until Play publication and credentials.)*
+- [ ] Never trust client-supplied payment amount, status or identity. *(Source uses server-configured fees, verifies provider order/amount/status before applying state, and HMAC-hashes payment identity. `test/notices.test.ts` checks the configured ₹49 renewal amount, but there is no focused existing test covering client attempts to alter amount/status/identity across the payment lifecycle; keep this item open. Payment deferral is a separate activation decision.)*
+- [ ] Uploads: size cap, magic-byte check, sharp re-encode and EXIF stripping. *(Implementation is present in `MediaService.prepareImage` (`src/modules/media/service.ts`), but `test/media.test.ts` and `test/image-ownership.test.ts` cover visibility, ownership, screening and cleanup—not size rejection, unsupported magic bytes, re-encoding or metadata removal. The previous claim that those security properties were tested in these files was unsupported.)*
+- [ ] Processing Record grants and triggers verified by a test that attempts `UPDATE` as the app role and expects failure. *(`test/retention.test.ts` has four conditional app-role tests; all four were skipped in the parent-reported 153-pass/4-skip run because `TEST_APP_DATABASE_URL` was not supplied. Existing cases attempt restricted-table reads/deletes and `processing_record` delete, but not `UPDATE`. The RDS read-only audit confirmed `agrawal_app` and seven migrations only; it did not verify grants.)*
+- [ ] Log redaction verified by a test that logs a registration request and asserts no phone, DOB or address in output. *(`src/logger.ts` redacts `req.body` and sensitive fields. `test/logging.test.ts` covers credentials, URL/device tokens and a standalone phone field; it does not log a registration request body or assert absence of phone, date of birth and address.)*
+- [ ] Dependencies pinned; `npm audit --omit=dev` reviewed. *(`package.json` declares exact versions for dependencies and devDependencies. The operational `npm audit --omit=dev` review remains open and was not run in this audit.)*
+- [x] Session cookie `HttpOnly; Secure; SameSite=Lax; Path=/`; tokens stored hashed. *(`src/http/auth.ts` sets these cookie attributes and `IdentityService` stores SHA-256 token hashes; `test/identity-auth.test.ts` verifies the emitted cookie attributes and that persisted token material differs from the bearer token.)*
+- [x] Officer and Operator routes require the role on the server; the web hiding a button is not access control. *(`src/modules/officer/routes.ts` mounts `requireRole("OFFICER")` and `requireRole("OPERATOR")`; `test/officer.test.ts` asserts 403 for a Member on an Officer route and an Officer on an Operator route.)*

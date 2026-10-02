@@ -327,7 +327,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckoutOrder"
+                  "$ref": "#/components/schemas/RegistrationCheckoutOrder"
                 }
               }
             }
@@ -710,7 +710,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "201": {
             "description": "Joiner became a Member.",
             "content": {
               "application/json": {
@@ -5671,6 +5671,7 @@
         "type": "string",
         "enum": [
           "REQUESTED",
+          "PROCESSING",
           "PROCESSED",
           "FAILED"
         ]
@@ -5690,15 +5691,56 @@
       "RegistrationPaymentSummary": {
         "type": "object",
         "required": [
+          "paymentId",
+          "purpose",
           "status",
-          "amount"
+          "amountPaise",
+          "currency",
+          "refund"
         ],
         "properties": {
+          "paymentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string",
+            "const": "REGISTRATION"
+          },
           "status": {
             "$ref": "#/components/schemas/PaymentStatus"
           },
-          "amount": {
-            "$ref": "#/components/schemas/Money"
+          "amountPaise": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "refund": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentRefundSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PaymentRefundSummary": {
+        "type": "object",
+        "required": [
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/RefundStatus"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/RefundReason"
           }
         }
       },
@@ -5766,6 +5808,17 @@
           }
         }
       },
+      "RegistrationRefundSummary": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "RegistrationResponse": {
         "type": "object",
         "required": [
@@ -5775,7 +5828,8 @@
           "payment",
           "founding",
           "join",
-          "refund"
+          "refund",
+          "completedMemberId"
         ],
         "properties": {
           "id": {
@@ -5820,7 +5874,17 @@
           "refund": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/RefundSummary"
+                "$ref": "#/components/schemas/RegistrationRefundSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completedMemberId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Uuid"
               },
               {
                 "type": "null"
@@ -5877,6 +5941,46 @@
           },
           "amount": {
             "$ref": "#/components/schemas/Money"
+          },
+          "prefill": {
+            "$ref": "#/components/schemas/CheckoutPrefill"
+          },
+          "alreadyPaid": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RegistrationCheckoutOrder": {
+        "type": "object",
+        "required": [
+          "paymentId",
+          "razorpayOrderId",
+          "keyId",
+          "amountPaise",
+          "currency",
+          "prefill",
+          "alreadyPaid"
+        ],
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "razorpayOrderId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "keyId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amountPaise": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "const": "INR"
           },
           "prefill": {
             "$ref": "#/components/schemas/CheckoutPrefill"
@@ -6106,7 +6210,8 @@
           "paymentId",
           "purpose",
           "status",
-          "amount",
+          "amountPaise",
+          "currency",
           "method",
           "capturedAt",
           "refund"
@@ -6121,8 +6226,13 @@
           "status": {
             "$ref": "#/components/schemas/PaymentStatus"
           },
-          "amount": {
-            "$ref": "#/components/schemas/Money"
+          "amountPaise": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "const": "INR"
           },
           "method": {
             "type": [
@@ -6143,7 +6253,7 @@
           "refund": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/RefundSummary"
+                "$ref": "#/components/schemas/PaymentRefundSummary"
               },
               {
                 "type": "null"
@@ -6944,7 +7054,8 @@
         "required": [
           "status",
           "memberId",
-          "family"
+          "family",
+          "completedAt"
         ],
         "properties": {
           "status": {
@@ -6956,6 +7067,9 @@
           },
           "family": {
             "$ref": "#/components/schemas/FamilyReference"
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/Timestamp"
           }
         }
       },
