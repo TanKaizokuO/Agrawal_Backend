@@ -111,7 +111,7 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Exchange a Firebase phone token for an API session",
+        "summary": "Create an API session from a Firebase phone token or fixed mobile OTP",
         "operationId": "createAuthSession",
         "x-auth": "public",
         "security": [],
@@ -5112,6 +5112,7 @@
           "INTERNAL",
           "UPSTREAM_UNAVAILABLE",
           "FIREBASE_TOKEN_INVALID",
+          "FIXED_OTP_INVALID",
           "PHONE_BELONGS_TO_ARCHIVED_MEMBER",
           "SESSION_EXPIRED",
           "PAYMENT_NOT_FOUND",
@@ -5562,7 +5563,19 @@
         }
       },
       "AuthSessionRequest": {
+        "description": "Supply exactly one supported authentication shape.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FirebaseAuthSessionRequest"
+          },
+          {
+            "$ref": "#/components/schemas/FixedOtpAuthSessionRequest"
+          }
+        ]
+      },
+      "FirebaseAuthSessionRequest": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "firebaseIdToken",
           "client"
@@ -5578,6 +5591,30 @@
               "WEB",
               "MOBILE"
             ]
+          }
+        }
+      },
+      "FixedOtpAuthSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phoneE164",
+          "otp",
+          "client"
+        ],
+        "properties": {
+          "phoneE164": {
+            "$ref": "#/components/schemas/PhoneE164"
+          },
+          "otp": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$",
+            "const": "123456",
+            "description": "Fixed six-digit code accepted by the server; no SMS is sent."
+          },
+          "client": {
+            "type": "string",
+            "const": "MOBILE"
           }
         }
       },

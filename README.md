@@ -30,8 +30,18 @@ This service owns the single HTTP contract that all client applications (`Agrawa
 - **Database & ORM**: PostgreSQL 18 (matches the AWS RDS 18.3 instance, ADR-0029) + Prisma 7 (pg adapter)
 - **Background Jobs**: `pg-boss` queue runner
 - **API Spec & Validation**: Zod v4 schemas + `@asteasolutions/zod-to-openapi` (OpenAPI v3.1)
-- **Authentication**: Firebase Phone Auth exchange → Secure HTTP-only session cookies / Bearer tokens
+- **Authentication**: Firebase Phone Auth for WEB; fixed OTP `123456` for MOBILE, with persistent database-backed bearer sessions (90-day sliding TTL)
 - **Testing**: Vitest + Supertest
+
+---
+
+## Authentication and rollout
+
+- WEB continues to exchange Firebase Phone Auth ID tokens for secure HTTP-only cookie sessions.
+- MOBILE sends `{ phoneE164, otp: "123456", client: "MOBILE" }` to `POST /v1/auth/session`; no SMS is sent. The API creates an actual PostgreSQL-backed session and returns a bearer token. `/v1/auth/me` restores the principal, and logout revokes the session.
+- Mobile bearer sessions have a 90-day sliding TTL. These are real Applicant or Member sessions, not client-generated credentials.
+- The shared fixed code is deliberately insecure and proves no ownership of the supplied number. Assume every app user can learn it; anyone who knows it can claim any phone number, including an existing Member's. Do not describe this as phone verification. Production release requires explicit Operator acceptance of this risk; replace the fixed code with delivered OTP verification before phone ownership is a security requirement.
+- Deploy the backend support before shipping the Flutter client: older API versions reject the fixed-OTP request shape.
 
 ---
 

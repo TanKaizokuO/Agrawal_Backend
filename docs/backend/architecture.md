@@ -16,7 +16,7 @@ The cross-cutting shape of the API (`Agrawal_Backend/`). Module-specific rules l
 | Logging | pino + pino-http | JSON logs, request ID on every line, redaction list below. |
 | Security headers | helmet | Default config; API serves JSON only. |
 | Tests | vitest + supertest | Against a real Postgres. |
-| Phone auth | `firebase-admin` (`auth().verifyIdToken`) | Client-side Firebase Phone Auth; server only verifies. |
+| Phone/session auth | Firebase Phone Auth exchange for WEB; fixed OTP `123456` for MOBILE | WEB Firebase ID tokens are verified server-side. Mobile creates a persisted PostgreSQL session with a 90-day sliding bearer lifetime; the fixed code sends no SMS and does not prove phone ownership. |
 | Payments | `razorpay` (Razorpay's first-party Node SDK) for orders, payments, refunds | Webhook signatures verified with `node:crypto` HMAC over the raw body. |
 | Storage | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | Private bucket; presigned GET URLs. |
 | Image processing | `sharp` | Re-encode every upload. |
@@ -172,6 +172,14 @@ Tuning values live in config with the defaults given in module files, never as l
 - Enums are `SCREAMING_SNAKE_CASE` strings.
 - Pagination: cursor-based. Query `?cursor=<opaque>&limit=<1..50, default 20>`. Response `{ items: [...], nextCursor: string | null }`.
 - Language: clients send `Accept-Language: en` or `hi`. Error `message` is localized from a server-side `{en, hi}` table keyed by error code; clients may use `code` to render their own copy.
+
+### Authentication sessions
+
+`POST /v1/auth/session` accepts either the established Firebase request `{ firebaseIdToken, client }` or the mobile-only fixed-code request `{ phoneE164, otp: "123456", client: "MOBILE" }`. The fixed request validates Indian E.164 phone format and a six-digit code, accepts only `123456`, and rejects Firebase-plus-phone payloads and WEB fixed-code requests. WEB continues to authenticate with Firebase and receives a secure HTTP-only session cookie.
+
+For MOBILE, the server checks the submitted phone against the register: an active Member gets a Member session, an archived Member is denied, and a new number opens the existing Registration as an Applicant. The database stores a hash of the bearer token in the session row; `/v1/auth/me` restores the current principal, the 90-day MOBILE session lifetime slides on activity, and `DELETE /v1/auth/session` revokes it.
+
+**Security and release requirement:** `123456` is deliberately fixed, shared, and not sent by SMS. It is not evidence that a person controls the supplied phone number; anyone who learns the code can claim any number, including a Member's. Treat this as intentionally insecure and require explicit Operator acceptance before production deployment. Replace it with delivered OTP verification before phone ownership is relied on. Deploy the backend support before shipping the Flutter client because older API versions reject this request shape.
 
 ### Error envelope
 

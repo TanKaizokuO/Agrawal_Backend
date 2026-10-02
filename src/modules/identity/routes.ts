@@ -66,8 +66,15 @@ export function createIdentityRoutes(deps: IdentityRouteDeps): Router {
     async (request: Request, response: Response) => {
       const body = CreateSessionBody.parse(request.body);
       const userAgent = request.get("User-Agent");
+      const authentication = "firebaseIdToken" in body
+        ? { kind: "FIREBASE" as const, idToken: body.firebaseIdToken }
+        : {
+            kind: "FIXED_OTP" as const,
+            phoneE164: body.phoneE164,
+            otp: body.otp,
+          };
       const created = await deps.service.createSession({
-        idToken: body.firebaseIdToken,
+        authentication,
         client: body.client,
         ipAddress: request.ip || "unknown",
         ...(userAgent === undefined ? {} : { userAgent }),

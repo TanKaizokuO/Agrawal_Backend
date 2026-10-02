@@ -22,6 +22,12 @@ const CURRENT_TIME = new Date("2026-09-25T12:00:00.000Z");
 
 function createIdentityFixture(options: {
   readonly sessions?: readonly SessionRow[];
+  readonly member?: {
+    readonly phoneE164: string;
+    readonly memberId: string;
+    readonly familyPublicId: string;
+    readonly status: "ACTIVE" | "ARCHIVED";
+  };
 } = {}) {
   const clock = new FixedClock(CURRENT_TIME);
   const sessions = [...(options.sessions ?? [])];
@@ -41,32 +47,18 @@ function createIdentityFixture(options: {
         ? candidate.id === where.id
         : candidate.tokenHash === where.tokenHash,
     ) ?? null),
-    create: () => Promise.resolve<SessionRow>({
-      id: "created-session",
-      tokenHash: "",
-      client: "MOBILE",
-      phoneE164: "+919000000000",
-      memberId: null,
-      registrationId: REGISTRATION_ID,
-      createdAt: clock.now(),
-      lastSeenAt: clock.now(),
-      expiresAt: clock.now(),
-      revokedAt: null,
-      revokedReason: null,
-      userAgent: null,
-    }),
+    create: ({ data }) => {
+      const created = data as unknown as SessionRow;
+      sessions.push(created);
+      return Promise.resolve(created);
+    },
     update: ({ where, data }) => {
       const index = sessions.findIndex((candidate) => candidate.id === where.id);
       const current = sessions[index];
       if (current === undefined) {
         return Promise.reject(new Error(`Missing session ${where.id}`));
       }
-      const lastSeenAt = data.lastSeenAt;
-      const expiresAt = data.expiresAt;
-      if (!(lastSeenAt instanceof Date) || !(expiresAt instanceof Date)) {
-        return Promise.reject(new Error("Unexpected session update in identity test"));
-      }
-      const updated = { ...current, lastSeenAt, expiresAt };
+      const updated = { ...current, ...data };
       sessions[index] = updated;
       return Promise.resolve(updated);
     },
@@ -104,17 +96,28 @@ function createIdentityFixture(options: {
       openForPhone: () => Promise.resolve({ registrationId: REGISTRATION_ID }),
     },
     register: {
-      memberPrincipalForPhone: () => Promise.resolve(null),
+      memberPrincipalForPhone: (phoneE164) => {
+        const member = options.member;
+        return Promise.resolve(member !== undefined && member.phoneE164 === phoneE164
+          ? { memberId: member.memberId, status: member.status }
+          : null);
+      },
       isActiveMember: () => Promise.resolve(false),
       isHeadOf: () => Promise.resolve(false),
-      familyOf: () => Promise.resolve(null),
+      familyOf: (memberId) => {
+        const member = options.member;
+        if (member === undefined || member.memberId !== memberId || member.status !== "ACTIVE") {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve({ publicId: member.familyPublicId });
+      },
     },
     clock,
     config: { sessionTtlWebDays: 30, sessionTtlMobileDays: 90 },
     rateLimitStore,
     processingRecord: { write: () => Promise.resolve() },
   });
-  return { service };
+  return { service, sessions };
 }
 
 function createIdentityApp(service: IdentityService) {
@@ -187,5 +190,180 @@ describe("identity HTTP authentication", () => {
       .set("Cookie", `sid=${token}`);
     expect(recent.status).toBe(200);
     expect(recent.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("creates a persisted Applicant bearer with fixed mobile OTP and revokes it on logout", async () => {
+    const { service, sessions } = createIdentityFixture();
+    const app = createIdentityApp(service);
+    const phoneE164 = "+919000000000";
+
+    const login = await request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164, otp: "123456", client: "MOBILE" });
+    expect(login.status).toBe(201);
+    const loginBody = z.object({
+      principal: z.object({
+        kind: z.literal("APPLICANT"),
+        phoneE164: z.string(),
+        registrationId: z.string(),
+      }),
+      token: z.string().min(1),
+    }).parse(login.body);
+    expect(loginBody.principal).toEqual({
+      kind: "APPLICANT",
+      phoneE164,
+      registrationId: REGISTRATION_ID,
+    });
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.phoneE164).toBe(phoneE164);
+    expect(sessions[0]?.registrationId).toBe(REGISTRATION_ID);
+    expect(sessions[0]?.tokenHash).not.toBe(loginBody.token);
+
+    const current = await request(app)
+      .get("/v1/auth/me")
+      .set("Authorization", `Bearer ${loginBody.token}`);
+    expect(current.status).toBe(200);
+    expect(current.body).toEqual({ principal: loginBody.principal });
+
+    const logout = await request(app)
+      .delete("/v1/auth/session")
+      .set("Authorization", `Bearer ${loginBody.token}`);
+    expect(logout.status).toBe(204);
+    expect(sessions[0]?.revokedReason).toBe("LOGOUT");
+    expect(sessions[0]?.revokedAt).toEqual(CURRENT_TIME);
+
+    const revoked = await request(app)
+      .get("/v1/auth/me")
+      .set("Authorization", `Bearer ${loginBody.token}`);
+    expect(revoked.status).toBe(401);
+  });
+
+  it("rejects incorrect OTP without creating a session", async () => {
+    const { service, sessions } = createIdentityFixture();
+    const app = createIdentityApp(service);
+
+    const response = await request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164: "+919000000000", otp: "654321", client: "MOBILE" });
+    const errorBody = z
+      .object({ error: z.object({ code: z.string() }) })
+      .parse(response.body);
+
+    expect(response.status).toBe(401);
+    expect(errorBody.error.code).toBe("FIXED_OTP_INVALID");
+    expect(sessions).toHaveLength(0);
+  });
+
+  it("validates phone and OTP boundaries and rejects WEB or ambiguous OTP requests", async () => {
+    const { service, sessions } = createIdentityFixture();
+    const app = createIdentityApp(service);
+
+    const invalidPhone = await request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164: "+915123456789", otp: "123456", client: "MOBILE" });
+    expect(invalidPhone.status).toBe(400);
+
+    const invalidOtp = await request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164: "+919000000000", otp: "12345", client: "MOBILE" });
+    expect(invalidOtp.status).toBe(400);
+
+    const webOtp = await request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164: "+919000000000", otp: "123456", client: "WEB" });
+    expect(webOtp.status).toBe(400);
+    expect(z.object({ error: z.object({ code: z.string() }) }).parse(webOtp.body).error.code)
+      .toBe("VALIDATION_FAILED");
+
+    const ambiguous = await request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({
+        firebaseIdToken: "1",
+        phoneE164: "+919000000000",
+        otp: "123456",
+        client: "MOBILE",
+      });
+    expect(ambiguous.status).toBe(400);
+    expect(z.object({ error: z.object({ code: z.string() }) }).parse(ambiguous.body).error.code)
+      .toBe("VALIDATION_FAILED");
+    expect(sessions).toHaveLength(0);
+  });
+
+  it("creates a Member principal for an active member and denies an archived phone", async () => {
+    const phoneE164 = "+919000000000";
+    const active = createIdentityFixture({
+      member: {
+        phoneE164,
+        memberId: "member-1",
+        familyPublicId: "AGR-123456-00001",
+        status: "ACTIVE",
+      },
+    });
+    const activeApp = createIdentityApp(active.service);
+    const login = await request(activeApp)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164, otp: "123456", client: "MOBILE" });
+    expect(login.status).toBe(201);
+    const memberLogin = z.object({
+      principal: z.object({
+        kind: z.literal("MEMBER"),
+        phoneE164: z.string(),
+        memberId: z.string(),
+        familyPublicId: z.string(),
+      }),
+      token: z.string().min(1),
+    }).parse(login.body);
+    expect(memberLogin.principal).toMatchObject({
+      kind: "MEMBER",
+      phoneE164,
+      memberId: "member-1",
+      familyPublicId: "AGR-123456-00001",
+    });
+    expect(active.sessions[0]?.memberId).toBe("member-1");
+    expect(active.sessions[0]?.registrationId).toBeNull();
+
+    const archived = createIdentityFixture({
+      member: {
+        phoneE164,
+        memberId: "archived-member",
+        familyPublicId: "AGR-123456-00001",
+        status: "ARCHIVED",
+      },
+    });
+    const archivedApp = createIdentityApp(archived.service);
+    const denied = await request(archivedApp)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164, otp: "123456", client: "MOBILE" });
+    expect(denied.status).toBe(403);
+    expect(z.object({ error: z.object({ code: z.string() }) }).parse(denied.body).error.code)
+      .toBe("PHONE_BELONGS_TO_ARCHIVED_MEMBER");
+    expect(archived.sessions).toHaveLength(0);
+  });
+
+  it("applies the existing per-phone limit to failed fixed OTP attempts", async () => {
+    const { service, sessions } = createIdentityFixture();
+    const app = createIdentityApp(service);
+    const requestOtp = () => request(app)
+      .post("/v1/auth/session")
+      .set("Origin", WEB_ORIGIN)
+      .send({ phoneE164: "+919000000000", otp: "654321", client: "MOBILE" });
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      expect((await requestOtp()).status).toBe(401);
+    }
+    const limited = await requestOtp();
+
+    expect(limited.status).toBe(429);
+    expect(z.object({ error: z.object({ code: z.string() }) }).parse(limited.body).error.code)
+      .toBe("RATE_LIMITED");
+    expect(sessions).toHaveLength(0);
   });
 });

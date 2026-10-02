@@ -5,10 +5,21 @@ export const PhoneE164 = z.string().regex(/^\+91[6-9]\d{9}$/u);
 export const FamilyPublicId = z.string().regex(/^AGR-[1-9]\d{5}-\d{5}$/u);
 export type SessionClientInput = z.infer<typeof SessionClientSchema>;
 
-export const CreateSessionBody = z.object({
+const FirebaseSessionRequest = z.object({
   firebaseIdToken: z.string().trim().min(1),
   client: SessionClientSchema,
-});
+}).strict();
+
+const FixedOtpSessionRequest = z.object({
+  phoneE164: PhoneE164,
+  otp: z.string().regex(/^\d{6}$/u),
+  client: z.literal("MOBILE"),
+}).strict();
+
+export const CreateSessionBody = z.union([
+  FirebaseSessionRequest,
+  FixedOtpSessionRequest,
+]);
 
 const PublicApplicantPrincipal = z.object({
   kind: z.literal("APPLICANT"),

@@ -35,6 +35,10 @@ export const ERROR_MESSAGES = {
     en: "The Firebase phone token is invalid.",
     hi: "Firebase फ़ोन टोकन अमान्य है।",
   },
+  FIXED_OTP_INVALID: {
+    en: "The fixed mobile OTP is incorrect.",
+    hi: "मोबाइल OTP गलत है।",
+  },
   PHONE_BELONGS_TO_ARCHIVED_MEMBER: {
     en: "This phone belongs to an archived Member.",
     hi: "यह फ़ोन किसी संग्रहीत सदस्य का है।",

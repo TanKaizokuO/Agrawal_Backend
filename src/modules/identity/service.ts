@@ -27,6 +27,8 @@ import type {
 } from "./db.js";
 
 const INDIAN_PHONE = /^\+91[6-9]\d{9}$/u;
+// Deliberately fixed until an SMS provider is integrated; accept only on MOBILE.
+const FIXED_MOBILE_OTP = "123456";
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const HOUR_SECONDS = 60 * 60;
@@ -240,16 +242,32 @@ export class IdentityService {
   }
 
   public async createSession(input: {
-    readonly idToken: string;
+    readonly authentication:
+      | { readonly kind: "FIREBASE"; readonly idToken: string }
+      | {
+          readonly kind: "FIXED_OTP";
+          readonly phoneE164: string;
+          readonly otp: string;
+        };
     readonly client: SessionClient;
     readonly ipAddress: string;
     readonly userAgent?: string;
   }): Promise<CreatedSession> {
     await this.consumeRateLimit("session.create.ip", input.ipAddress, SESSION_IP_LIMIT);
-    const verified = await this.verifiedPhone(input.idToken);
-    await this.consumeRateLimit("session.create.phone", verified.phoneE164, SESSION_PHONE_LIMIT);
 
-    const existingMember = await this.register.memberPrincipalForPhone(verified.phoneE164);
+    const authentication = input.authentication;
+    if (authentication.kind === "FIXED_OTP" && input.client !== "MOBILE") {
+      throw new AppError("VALIDATION_FAILED", 400);
+    }
+    const phoneE164 = authentication.kind === "FIREBASE"
+      ? (await this.verifiedPhone(authentication.idToken)).phoneE164
+      : authentication.phoneE164;
+    await this.consumeRateLimit("session.create.phone", phoneE164, SESSION_PHONE_LIMIT);
+    if (authentication.kind === "FIXED_OTP" && authentication.otp !== FIXED_MOBILE_OTP) {
+      throw new AppError("FIXED_OTP_INVALID", 401);
+    }
+
+    const existingMember = await this.register.memberPrincipalForPhone(phoneE164);
     if (existingMember?.status === "ARCHIVED") {
       throw new AppError("PHONE_BELONGS_TO_ARCHIVED_MEMBER", 403);
     }
@@ -264,14 +282,14 @@ export class IdentityService {
     let registrationId: string | null = null;
     await this.db.$transaction(async (tx) => {
       if (existingMember === null) {
-        registrationId = (await this.registration.openForPhone(tx, verified.phoneE164)).registrationId;
+        registrationId = (await this.registration.openForPhone(tx, phoneE164)).registrationId;
       }
       await tx.session.create({
         data: {
           id: sessionId,
           tokenHash: hashToken(token),
           client: input.client,
-          phoneE164: verified.phoneE164,
+          phoneE164,
           memberId: existingMember?.memberId ?? null,
           registrationId,
           createdAt: now,
@@ -288,7 +306,7 @@ export class IdentityService {
       id: sessionId,
       tokenHash: hashToken(token),
       client: input.client,
-      phoneE164: verified.phoneE164,
+      phoneE164,
       memberId: existingMember?.memberId ?? null,
       registrationId,
       createdAt: now,
