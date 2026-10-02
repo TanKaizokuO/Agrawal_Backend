@@ -5,6 +5,8 @@ import type { PaymentGateway, PaymentProviderPayment, PaymentRefund } from "../s
 import { FixedClock } from "../src/clock.js";
 import type { JobRuntime, JobSendOptions } from "../src/jobs.js";
 import { PaymentService, PaymentWebhookService } from "../src/modules/payments/index.js";
+import { OfficerService } from "../src/modules/officer/index.js";
+import { createProcessingRecordWriter } from "../src/adapters/processing-record.js";
 import { getTestDatabase } from "./setup.js";
 
 class FakeGateway implements PaymentGateway {
@@ -694,4 +696,48 @@ describe("Payment reliability", () => {
     expect(jobs.sent.some((job) => job.name === "payments.refunded.REGISTRATION")).toBe(true);
   });
 
+  it("records the Officer's refund reason on the refund's processing record", async () => {
+    const database = getTestDatabase();
+    const clock = new FixedClock(new Date("2026-09-22T04:00:00.000Z"));
+    const processingRecord = createProcessingRecordWriter({ clock, retentionDays: 365 });
+    const payments = new PaymentService({
+      db: database,
+      gateway: new FakeGateway(),
+      jobs: new TestJobs(),
+      clock,
+      config: {
+        razorpayKeyId: "rzp_test_key",
+        razorpayKeySecret: "secret",
+        paymentIdentityHmacKey: "hmac-key",
+        orderCreationClaimLeaseSeconds: 300,
+        refundClaimLeaseSeconds: 3600,
+        outboxClaimLeaseSeconds: 300,
+        outboxJobDedupSeconds: 3600,
+      },
+      processingRecord,
+    });
+    const officer = new OfficerService({
+      db: database,
+      clock,
+      retentionDaysConsentAndLogs: 365,
+      register: {
+        project: () => Promise.resolve(new Map()),
+        eraseMember: () => Promise.resolve(),
+        readNomineeForOfficer: () => Promise.resolve(null),
+        unarchiveMember: () => Promise.resolve({ successionReverted: false }),
+      },
+      processingRecord,
+      payments,
+    });
+    const { payment } = await seedPayment();
+
+    await officer.refundPayment(payment.id, "officer-1", "  Charged twice for one registration  ");
+
+    const record = await database.processingRecord.findFirstOrThrow({
+      where: { action: "REFUND_REQUESTED", subjectId: payment.id },
+    });
+    expect(record.reason).toBe("Charged twice for one registration");
+    await expect(database.refund.findUniqueOrThrow({ where: { paymentId: payment.id } }))
+      .resolves.toMatchObject({ reason: "OFFICER", status: "REQUESTED" });
+  });
 });

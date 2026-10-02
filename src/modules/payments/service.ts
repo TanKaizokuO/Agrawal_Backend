@@ -168,6 +168,7 @@ export interface ProcessingRecordWriter {
       readonly action: "REFUND_REQUESTED";
       readonly subjectId: string;
       readonly actor: Actor;
+      readonly reason?: string;
     },
   ): Promise<void>;
 }
@@ -712,6 +713,7 @@ export class PaymentService {
     paymentId: string,
     reason: RefundReason,
     actor: Actor,
+    note?: string,
   ): Promise<void> {
     const existing = await tx.refund.findUnique({ where: { paymentId } });
     if (existing !== null) return;
@@ -745,6 +747,7 @@ export class PaymentService {
         action: "REFUND_REQUESTED",
         subjectId: paymentId,
         actor,
+        ...(note === undefined ? {} : { reason: note }),
       });
     }
 

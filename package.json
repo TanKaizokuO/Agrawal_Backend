@@ -46,6 +46,8 @@
     "@types/node": "26.6.2",
     "@types/pg": "8.23.1",
     "@types/supertest": "7.2.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "eslint": "9.21.0",
     "openapi3-ts": "4.6.1",
     "supertest": "7.2.2",
