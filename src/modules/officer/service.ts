@@ -128,6 +128,7 @@ export interface OfficerPaymentsPort {
     paymentId: string,
     reason: "OFFICER",
     actor: { readonly kind: "OFFICER"; readonly id: string },
+    note: string,
   ): Promise<void>;
 }
 
@@ -698,10 +699,16 @@ export class OfficerService implements ProcessingRecordWriter {
         });
       }
     });
+    const archivedIds = page.memberIds.length === 0
+      ? new Set<string>()
+      : new Set((await this.db.member.findMany({
+        where: { id: { in: [...page.memberIds] }, status: "ARCHIVED" },
+        select: { id: true },
+      })).map((row) => row.id));
     return {
       items: page.memberIds.flatMap((memberId) => {
         const member = officerView(projections.get(memberId));
-        return member === null ? [] : [{ member }];
+        return member === null ? [] : [{ member, archived: archivedIds.has(memberId) }];
       }),
       nextCursor: page.nextCursor,
     };
@@ -737,14 +744,14 @@ export class OfficerService implements ProcessingRecordWriter {
     await media.approveImage({ imageId, officerMemberId: officerId });
   }
 
-  async refundPayment(paymentId: string, officerId: string, _reason: string): Promise<void> {
-    _reason.trim();
+  async refundPayment(paymentId: string, officerId: string, reason: string): Promise<void> {
     const payments = requireDependency(this.payments);
     await this.withTransaction((tx) => payments.refund(
       tx,
       paymentId,
       "OFFICER",
       { kind: "OFFICER", id: officerId },
+      reason.trim(),
     ));
   }
 

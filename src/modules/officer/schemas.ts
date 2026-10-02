@@ -250,6 +250,8 @@ export interface ErasureRequestPage {
 
 export interface MemberLookupView {
   readonly member: OfficerMemberView;
+  /** Whether the Member is Archived, so the console offers Unarchive only then. */
+  readonly archived: boolean;
 }
 
 export interface MemberLookupPage {

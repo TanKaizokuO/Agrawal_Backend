@@ -934,12 +934,8 @@ paths:
             schema:
               $ref: '#/components/schemas/FlagResolveRequest'
       responses:
-        '200':
+        '204':
           description: Resolved flag.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Flag'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -991,12 +987,8 @@ paths:
             schema:
               $ref: '#/components/schemas/OfficerEraseRequest'
       responses:
-        '200':
+        '204':
           description: Erasure executed.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErasureResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1072,12 +1064,8 @@ paths:
             schema:
               $ref: '#/components/schemas/ImageRemoveRequest'
       responses:
-        '200':
+        '204':
           description: Image removed and detached from its owner.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OfficerImage'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1097,12 +1085,8 @@ paths:
         - $ref: '#/components/parameters/ImageId'
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '200':
+        '204':
           description: Image approved by Officer override.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OfficerImage'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1130,12 +1114,8 @@ paths:
             schema:
               $ref: '#/components/schemas/OfficerRefundRequest'
       responses:
-        '202':
+        '204':
           description: Refund requested.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RefundResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1265,12 +1245,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SuspensionLiftRequest'
       responses:
-        '200':
+        '204':
           description: Suspension lifted.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Suspension'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1298,7 +1274,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ArchivalRequestPage'
+                $ref: '#/components/schemas/OfficerArchivalRequestPage'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1322,12 +1298,8 @@ paths:
             schema:
               $ref: '#/components/schemas/ArchivalResolveRequest'
       responses:
-        '200':
+        '204':
           description: Resolved Archival Request.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ArchivalRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1379,12 +1351,8 @@ paths:
             schema:
               $ref: '#/components/schemas/ReasonRequest'
       responses:
-        '200':
+        '204':
           description: Blood SOS closed by Officer.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BloodSosResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1409,12 +1377,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RoleChangeRequest'
       responses:
-        '200':
+        '204':
           description: Updated role assignment.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RoleChangeResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3335,18 +3299,6 @@ components:
           type: string
         razorpaySignature:
           type: string
-    RefundResponse:
-      type: object
-      required: [paymentId, status, reason, amount]
-      properties:
-        paymentId:
-          $ref: '#/components/schemas/Uuid'
-        status:
-          $ref: '#/components/schemas/RefundStatus'
-        reason:
-          $ref: '#/components/schemas/RefundReason'
-        amount:
-          $ref: '#/components/schemas/Money'
     WebhookAcceptedResponse:
       type: object
       required: [accepted]
@@ -3913,21 +3865,22 @@ components:
             type: string
             format: uuid
         subject:
-          $ref: '#/components/schemas/SamajMemberProjection'
+          description: The flagged Member; null when the subject is not a Member.
+          oneOf:
+            - $ref: '#/components/schemas/OfficerMember'
+            - type: 'null'
         relatedMembers:
           type: array
           items:
-            $ref: '#/components/schemas/SamajMemberProjection'
-        maskedPhone:
-          type: [string, 'null']
-        identityMasked:
-          type: [string, 'null']
+            $ref: '#/components/schemas/OfficerMember'
         createdAt:
           $ref: '#/components/schemas/Timestamp'
         resolvedAt:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
+        resolvedBy:
+          type: [string, 'null']
         resolution:
           type: [string, 'null']
           enum: [CLEARED, ERASED_MEMBER, null]
@@ -3966,18 +3919,22 @@ components:
           format: uuid
     OfficerErasureRequest:
       type: object
-      required: [id, memberId, status, requestedAt, member]
+      required: [id, memberId, source, status, requestedAt, member]
       properties:
         id:
           $ref: '#/components/schemas/Uuid'
         memberId:
           $ref: '#/components/schemas/Uuid'
+        source:
+          type: string
         status:
           $ref: '#/components/schemas/ErasureStatus'
         requestedAt:
           $ref: '#/components/schemas/Timestamp'
         member:
-          $ref: '#/components/schemas/SamajMemberProjection'
+          oneOf:
+            - $ref: '#/components/schemas/OfficerMember'
+            - type: 'null'
     OfficerErasureRequestPage:
       type: object
       required: [items, nextCursor]
@@ -3989,14 +3946,39 @@ components:
         nextCursor:
           type: [string, 'null']
     OfficerMember:
-      allOf:
-        - $ref: '#/components/schemas/SamajMemberProjection'
-        - type: object
-          required: [maskedPhone]
-          properties:
-            maskedPhone:
-              type: string
-              description: Phone with only the final four digits exposed.
+      type: object
+      description: Officer view of a Member. Fields the Member's projection withholds are omitted.
+      required: [memberId, familyPublicId, isHead]
+      properties:
+        memberId:
+          $ref: '#/components/schemas/Uuid'
+        familyPublicId:
+          $ref: '#/components/schemas/FamilyPublicId'
+        isHead:
+          type: boolean
+        name:
+          $ref: '#/components/schemas/BilingualName'
+        gotra:
+          $ref: '#/components/schemas/Gotra'
+        city:
+          type: string
+        state:
+          $ref: '#/components/schemas/IndianState'
+        photoUrl:
+          type: [string, 'null']
+          format: uri
+        phoneLast4:
+          type: string
+          description: Phone with only the final four digits exposed, e.g. ***3210.
+    OfficerMemberLookupItem:
+      type: object
+      required: [member, archived]
+      properties:
+        member:
+          $ref: '#/components/schemas/OfficerMember'
+        archived:
+          type: boolean
+          description: Whether the Member is Archived; only an Archived Member can be unarchived.
     OfficerMemberPage:
       type: object
       required: [items, nextCursor]
@@ -4004,7 +3986,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/OfficerMember'
+            $ref: '#/components/schemas/OfficerMemberLookupItem'
         nextCursor:
           type: [string, 'null']
     OfficerImage:
@@ -4069,10 +4051,8 @@ components:
             - type: 'null'
     UnarchiveResponse:
       type: object
-      required: [member, successionReverted]
+      required: [successionReverted]
       properties:
-        member:
-          $ref: '#/components/schemas/SamajMemberProjection'
         successionReverted:
           type: boolean
           const: false
@@ -4338,6 +4318,46 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArchivalRequest'
+        nextCursor:
+          type: [string, 'null']
+    OfficerArchivalRequest:
+      type: object
+      description: An Archival Request as the Officer queue returns it.
+      required: [id, noticeMemberId, deceasedMemberId, familyId, status, createdAt, respondedAt, respondedBy, escalatedAt, expiresAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        noticeMemberId:
+          type: [string, 'null']
+          format: uuid
+        deceasedMemberId:
+          $ref: '#/components/schemas/Uuid'
+        familyId:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          $ref: '#/components/schemas/ArchivalRequestStatus'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        respondedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        respondedBy:
+          type: [string, 'null']
+        escalatedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        expiresAt:
+          $ref: '#/components/schemas/Timestamp'
+    OfficerArchivalRequestPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OfficerArchivalRequest'
         nextCursor:
           type: [string, 'null']
     ArchivalResolveRequest:
@@ -4914,17 +4934,6 @@ components:
         role:
           type: string
           enum: [ORGANISER, OFFICER]
-        action:
-          type: string
-          enum: [GRANT, REVOKE]
-    RoleChangeResponse:
-      type: object
-      required: [memberId, role, action]
-      properties:
-        memberId:
-          $ref: '#/components/schemas/Uuid'
-        role:
-          $ref: '#/components/schemas/Role'
         action:
           type: string
           enum: [GRANT, REVOKE]
