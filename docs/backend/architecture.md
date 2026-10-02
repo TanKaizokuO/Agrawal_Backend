@@ -147,6 +147,7 @@ Payments must not import Registration or Noticeboards. It announces a captured o
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | | Test keys on staging, live on production. |
 | `RAZORPAY_WEBHOOK_SECRET` | | |
 | `REGISTRATION_PAYMENT_PAISE` | `100` | ₹1 (ADR-0016). |
+| `REGISTRATION_PAYMENT_REQUIRED` | `true` (fail-closed) | Only explicit `false` enables unpaid registration for the controlled pilot; the flag is server-side policy. |
 | `BUSINESS_LISTING_FEE_PAISE` | `4900` | ₹49 (ADR-0016). |
 | `PAYMENT_IDENTITY_HMAC_KEY` | 32 random bytes, base64 | Hashes VPAs/card ids for matching. |
 | `S3_BUCKET` / `AWS_REGION` | `ap-south-1` | |
