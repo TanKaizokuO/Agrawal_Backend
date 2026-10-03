@@ -99,7 +99,7 @@ Done when: two phones on staging — one founds, one joins with that Family ID �
 Done when: the Officer, signed in on staging, clears a flag, removes an image (the Member sees the reason on `/v1/me`), and erases a Member — after which the Member's session is dead, their profile and images are gone, and their payment and consent rows sit in `restricted` with a `retainUntil`; each of those actions has a Processing Record row that cannot be updated or deleted by the app's database role.
 
 **M5 — Production cutover.** Read the Deployment section of `architecture.md`.
-- Production database `agrawal_prod`, production DLT registration and MSG91 Flow template setup (ADR-0033), Razorpay **live** keys and live webhook secret, UPI Intent confirmed enabled on the Razorpay account, secrets in SSM, tagged release.
+- Production database `agrawal_prod`, production DLT registration and Amazon SNS setup (ADR-0034), Razorpay **live** keys and live webhook secret, UPI Intent confirmed enabled on the Razorpay account, secrets in SSM, tagged release.
 
 Done when: on production, a real phone pays a real ₹1, founds a Family, and the payment's `vpa` is recorded as its Payment Identity (if `vpa` is absent, record that fact in `open-questions.md` — it decides how many founders get flagged); that test Member is then erased by the Officer and the ₹1 refunded; RDS automated backups are on with 7-day retention.
 

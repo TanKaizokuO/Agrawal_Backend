@@ -116,10 +116,11 @@ locals {
   operator_parameters = {
     FIREBASE_PROJECT_ID                 = { secure = false, description = "Firebase Project ID for Phone Authentication" }
     FIREBASE_SERVICE_ACCOUNT_JSON       = { secure = true, description = "Firebase Service Account JSON credentials" }
-    SMS_PROVIDER                        = { secure = false, description = "`msg91` for production; `console` dev-only" }
-    MSG91_AUTH_KEY                      = { secure = true, description = "MSG91 Flow API credentials" }
-    MSG91_TEMPLATE_ID                   = { secure = false, description = "MSG91 Flow template mapped to DLT template ID" }
-    MSG91_OTP_VAR                       = { secure = false, description = "template OTP variable name, default `otp`" }
+    SMS_PROVIDER                        = { secure = false, description = "`sns` for production; `console` dev-only" }
+    SNS_SMS_SENDER_ID                   = { secure = false, description = "DLT-approved SMS sender header (AWS.SNS.SMS.SenderID)" }
+    SNS_SMS_ENTITY_ID                   = { secure = false, description = "DLT Principal Entity ID (AWS.MM.SMS.EntityId)" }
+    SNS_SMS_TEMPLATE_ID                 = { secure = false, description = "DLT OTP content template ID (AWS.MM.SMS.TemplateId)" }
+    SNS_SMS_OTP_MESSAGE                 = { secure = false, description = "Exact DLT-approved OTP text with {otp} exactly once" }
     OTP_HMAC_KEY                        = { secure = true, description = "HMAC-SHA256 key for OTP verification hashes" }
     RAZORPAY_KEY_ID                     = { secure = true, description = "Razorpay Key ID" }
     RAZORPAY_KEY_SECRET                 = { secure = true, description = "Razorpay Key Secret" }

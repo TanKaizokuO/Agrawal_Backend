@@ -59,7 +59,7 @@ resource "aws_iam_role_policy_attachment" "ecr_read" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
-# Least-privilege inline policy: SSM Parameter Store access + KMS Decrypt + S3 Media
+# Least-privilege inline policy: SSM Parameter Store access + KMS Decrypt + S3 Media + SNS SMS
 resource "aws_iam_role_policy" "ec2_app_policy" {
   name = "agrawal-${var.environment}-ec2-app-policy"
   role = aws_iam_role.ec2_role.id
@@ -103,6 +103,14 @@ resource "aws_iam_role_policy" "ec2_app_policy" {
           aws_s3_bucket.media.arn,
           "${aws_s3_bucket.media.arn}/*"
         ]
+      },
+      {
+        # OTP SMS via Amazon SNS. Direct-to-phone Publish has no resource ARN;
+        # NotResource on every SNS ARN allows SMS only, not topic/endpoint publishes.
+        Sid         = "SNSDirectSmsPublish"
+        Effect      = "Allow"
+        Action      = ["sns:Publish"]
+        NotResource = "arn:aws:sns:*:*:*"
       }
     ]
   })

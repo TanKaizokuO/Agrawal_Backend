@@ -30,19 +30,19 @@ This service owns the single HTTP contract that all client applications (`Agrawa
 - **Database & ORM**: PostgreSQL 18 (matches the AWS RDS 18.3 instance, ADR-0029) + Prisma 7 (pg adapter)
 - **Background Jobs**: `pg-boss` queue runner
 - **API Spec & Validation**: Zod v4 schemas + `@asteasolutions/zod-to-openapi` (OpenAPI v3.1)
-- **Authentication**: Backend SMS OTP via MSG91 Flow API (`POST /v1/auth/otp` and `POST /v1/auth/session`, ADR-0033) for both WEB and MOBILE, with persistent database-backed sessions (HTTP-only cookie for WEB, 90-day sliding bearer TTL for MOBILE)
+- **Authentication**: Backend SMS OTP via Amazon SNS (`POST /v1/auth/otp` and `POST /v1/auth/session`, ADR-0034; lifecycle defined in ADR-0033) for both WEB and MOBILE, with persistent database-backed sessions (HTTP-only cookie for WEB, 90-day sliding bearer TTL for MOBILE)
 - **Testing**: Vitest + Supertest
 
 ---
 
 ## Authentication and rollout
 
-- Both WEB and MOBILE use backend-authoritative SMS OTP delivery via MSG91 Flow API (ADR-0033):
-  1. `POST /v1/auth/otp`: `{ client, phoneE164 }` → generates 6-digit code (TTL 300s, max 5 attempts, 30s resend cooldown, limits 5/hr per phone and 20/hr per IP), hashes with HMAC-SHA256 (`OTP_HMAC_KEY`), stores in `OtpChallenge`, dispatches via MSG91 Flow API. Returns `202 Accepted` with `{ expiresInSeconds: 300, resendAfterSeconds: 30 }`.
+- Both WEB and MOBILE use backend-authoritative SMS OTP delivery via Amazon SNS (ADR-0034; lifecycle defined in ADR-0033):
+  1. `POST /v1/auth/otp`: `{ client, phoneE164 }` → generates 6-digit code (TTL 300s, max 5 attempts, 30s resend cooldown, limits 5/hr per phone and 20/hr per IP), hashes with HMAC-SHA256 (`OTP_HMAC_KEY`), stores in `OtpChallenge`, dispatches via Amazon SNS. Returns `202 Accepted` with `{ expiresInSeconds: 300, resendAfterSeconds: 30 }`.
   2. `POST /v1/auth/session`: `{ client, authentication: { kind: "SMS_OTP", phoneE164, otp } }` → verifies OTP, creates session (HTTP-only `sid` cookie for WEB, 90-day sliding bearer token for MOBILE).
   3. Errors: `OTP_INVALID` 401, `OTP_ATTEMPTS_EXCEEDED` 429, `OTP_DELIVERY_FAILED` 502, `RATE_LIMITED` 429, `VALIDATION_FAILED` 400.
 - Legacy Firebase Phone Auth and the temporary mobile fixed OTP `123456` are removed.
-- Production requires completed Indian DLT PEID registration and MSG91 Flow template approval before live SMS delivery is enabled; local/test runs use `SMS_PROVIDER=console`.
+- Production requires completed Indian DLT PEID registration and Amazon SNS setup before live SMS delivery is enabled; local/test runs use `SMS_PROVIDER=console`.
 ---
 
 ## Directory Layout

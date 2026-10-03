@@ -1,9 +1,10 @@
 import type { Logger } from "pino";
+import type { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
 import { describe, expect, it, vi } from "vitest";
 import { ConfigError, loadConfig } from "../src/config.js";
 import {
   ConsoleSmsSender,
-  Msg91SmsSender,
+  SnsSmsSender,
   createSmsSender,
 } from "../src/modules/identity/sms/index.js";
 
@@ -29,222 +30,72 @@ function baseTestEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
-describe("Msg91SmsSender", () => {
-  it("sends request with correct URL, authkey header, template_id, recipient mobiles, and default otp var", async () => {
-    let capturedUrl: string | undefined;
-    let capturedInit: RequestInit | undefined;
+const SNS_OPTIONS = {
+  region: "ap-south-1",
+  senderId: "AGRWAL",
+  entityId: "1201000000000012345",
+  templateId: "1207168000000054321",
+  messageTemplate: "Your Agrawal Samaj verification code is {otp}. Valid for 5 minutes.",
+};
 
-    const mockFetch: typeof fetch = (input, init) => {
-      capturedUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      capturedInit = init;
-      const responseBody = JSON.stringify({
-        type: "success",
-        message: "Flow process started",
-      });
-      return Promise.resolve(
-        new Response(responseBody, {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    };
+function fakeSnsClient(send: (command: PublishCommand) => Promise<unknown>): SNSClient {
+  return { send } as unknown as SNSClient;
+}
 
-    const sender = new Msg91SmsSender({
-      authKey: "test-auth-key-123",
-      templateId: "tmpl-456",
-      fetchImpl: mockFetch,
+describe("SnsSmsSender", () => {
+  it("publishes the rendered DLT message to the phone with transactional DLT attributes", async () => {
+    const commands: PublishCommand[] = [];
+    const sender = new SnsSmsSender({
+      ...SNS_OPTIONS,
+      client: fakeSnsClient((command) => {
+        commands.push(command);
+        return Promise.resolve({ MessageId: "msg-1" });
+      }),
     });
 
-    await sender.sendOtp("+919876543210", "654321");
+    await sender.sendOtp("+919876543210", "482913");
 
-    expect(capturedUrl).toBe("https://control.msg91.com/api/v5/flow");
-    expect(capturedInit?.method).toBe("POST");
-
-    const headers = capturedInit?.headers as Record<string, string>;
-    expect(headers.authkey).toBe("test-auth-key-123");
-    expect(headers["content-type"]).toBe("application/json");
-
-    const bodyText = typeof capturedInit?.body === "string" ? capturedInit.body : "";
-    const parsedBody = JSON.parse(bodyText) as {
-      template_id: string;
-      short_url: string;
-      recipients: Array<{ mobiles: string; otp: string }>;
-    };
-    expect(parsedBody.template_id).toBe("tmpl-456");
-    expect(parsedBody.short_url).toBe("0");
-    expect(parsedBody.recipients).toEqual([
-      {
-        mobiles: "919876543210",
-        otp: "654321",
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.input).toEqual({
+      PhoneNumber: "+919876543210",
+      Message: "Your Agrawal Samaj verification code is 482913. Valid for 5 minutes.",
+      MessageAttributes: {
+        "AWS.SNS.SMS.SMSType": { DataType: "String", StringValue: "Transactional" },
+        "AWS.SNS.SMS.SenderID": { DataType: "String", StringValue: "AGRWAL" },
+        "AWS.MM.SMS.EntityId": { DataType: "String", StringValue: "1201000000000012345" },
+        "AWS.MM.SMS.TemplateId": { DataType: "String", StringValue: "1207168000000054321" },
       },
-    ]);
-  });
-
-  it("uses custom otpVar when provided in options", async () => {
-    let capturedBody: string | undefined;
-
-    const mockFetch: typeof fetch = (_input, init) => {
-      capturedBody = typeof init?.body === "string" ? init.body : undefined;
-      return Promise.resolve(
-        new Response(JSON.stringify({ type: "success" }), { status: 200 }),
-      );
-    };
-
-    const sender = new Msg91SmsSender({
-      authKey: "test-auth-key",
-      templateId: "tmpl-custom-var",
-      otpVar: "custom_otp",
-      fetchImpl: mockFetch,
-    });
-
-    await sender.sendOtp("+919123456789", "888999");
-
-    const parsed = JSON.parse(capturedBody ?? "") as {
-      recipients: Array<{ mobiles: string; custom_otp: string }>;
-    };
-    expect(parsed.recipients[0]).toEqual({
-      mobiles: "919123456789",
-      custom_otp: "888999",
     });
   });
 
-  it("formats phone number without leading plus", async () => {
-    let capturedBody: string | undefined;
-
-    const mockFetch: typeof fetch = (_input, init) => {
-      capturedBody = typeof init?.body === "string" ? init.body : undefined;
-      return Promise.resolve(
-        new Response(JSON.stringify({ type: "success" }), { status: 200 }),
-      );
-    };
-
-    const sender = new Msg91SmsSender({
-      authKey: "test-auth-key",
-      templateId: "tmpl-phone-test",
-      fetchImpl: mockFetch,
+  it("propagates SNS errors so the challenge is rolled back", async () => {
+    const sender = new SnsSmsSender({
+      ...SNS_OPTIONS,
+      client: fakeSnsClient(() => Promise.reject(new Error("Throttling"))),
     });
 
-    await sender.sendOtp("919988776655", "112233");
-
-    const parsed = JSON.parse(capturedBody ?? "") as {
-      recipients: Array<{ mobiles: string }>;
-    };
-    expect(parsed.recipients[0]?.mobiles).toBe("919988776655");
+    await expect(sender.sendOtp("+919876543210", "123456")).rejects.toThrow(/Throttling/);
   });
 
-  it("fails when response HTTP status is non-2xx", async () => {
-    const mockFetch: typeof fetch = () => {
-      return Promise.resolve(
-        new Response(JSON.stringify({ message: "Invalid credentials" }), {
-          status: 401,
-          statusText: "Unauthorized",
-        }),
-      );
-    };
-
-    const sender = new Msg91SmsSender({
-      authKey: "wrong-key",
-      templateId: "tmpl-error",
-      fetchImpl: mockFetch,
+  it("fails when SNS returns no MessageId", async () => {
+    const sender = new SnsSmsSender({
+      ...SNS_OPTIONS,
+      client: fakeSnsClient(() => Promise.resolve({})),
     });
 
-    await expect(sender.sendOtp("+919876543210", "123456")).rejects.toThrow(
-      /MSG91 request failed with HTTP 401/,
-    );
+    await expect(sender.sendOtp("+919876543210", "123456")).rejects.toThrow(/no MessageId/);
   });
 
-  it("fails when response JSON body has type !== 'success'", async () => {
-    const mockFetch: typeof fetch = () => {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            type: "error",
-            message: "Mobile number is blocked",
-          }),
-          { status: 200 },
-        ),
-      );
-    };
-
-    const sender = new Msg91SmsSender({
-      authKey: "test-key",
-      templateId: "tmpl-blocked",
-      fetchImpl: mockFetch,
-    });
-
-    await expect(sender.sendOtp("+919876543210", "123456")).rejects.toThrow(
-      /MSG91 delivery failed: Mobile number is blocked/,
-    );
-  });
-
-  it("fails when response body is not valid JSON", async () => {
-    const mockFetch: typeof fetch = () => {
-      return Promise.resolve(
-        new Response("Gateway Timeout", {
-          status: 200,
-          headers: { "content-type": "text/plain" },
-        }),
-      );
-    };
-
-    const sender = new Msg91SmsSender({
-      authKey: "test-key",
-      templateId: "tmpl-invalid-json",
-      fetchImpl: mockFetch,
-    });
-
-    await expect(sender.sendOtp("+919876543210", "123456")).rejects.toThrow(
-      /MSG91 response was not valid JSON/,
-    );
-  });
-
-  it("propagates AbortSignal to fetchImpl", async () => {
-    let capturedSignal: AbortSignal | null | undefined;
-
-    const mockFetch: typeof fetch = (_input, init) => {
-      capturedSignal = init?.signal;
-      return Promise.resolve(
-        new Response(JSON.stringify({ type: "success" }), { status: 200 }),
-      );
-    };
-
-    const sender = new Msg91SmsSender({
-      authKey: "test-key",
-      templateId: "tmpl-signal",
-      timeoutMs: 5000,
-      fetchImpl: mockFetch,
-    });
-
-    await sender.sendOtp("+919876543210", "123456");
-
-    expect(capturedSignal).toBeDefined();
-    expect(capturedSignal?.aborted).toBe(false);
-  });
   it("validates required options in constructor", () => {
+    expect(() => new SnsSmsSender({ ...SNS_OPTIONS, senderId: " " })).toThrow(/sender ID is required/);
+    expect(() => new SnsSmsSender({ ...SNS_OPTIONS, entityId: "" })).toThrow(/entity ID is required/);
+    expect(() => new SnsSmsSender({ ...SNS_OPTIONS, templateId: "" })).toThrow(/template ID is required/);
+    expect(() => new SnsSmsSender({ ...SNS_OPTIONS, messageTemplate: "Code: 123" })).toThrow(
+      /\{otp\} exactly once/,
+    );
     expect(
-      () =>
-        new Msg91SmsSender({
-          authKey: "",
-          templateId: "tmpl-1",
-        }),
-    ).toThrow(/MSG91 auth key is required/);
-
-    expect(
-      () =>
-        new Msg91SmsSender({
-          authKey: "auth-1",
-          templateId: "",
-        }),
-    ).toThrow(/MSG91 template ID is required/);
-
-    expect(
-      () =>
-        new Msg91SmsSender({
-          authKey: "auth-1",
-          templateId: "tmpl-1",
-          timeoutMs: -5,
-        }),
-    ).toThrow(/MSG91 timeout must be a positive integer/);
+      () => new SnsSmsSender({ ...SNS_OPTIONS, messageTemplate: "{otp} and {otp}" }),
+    ).toThrow(/\{otp\} exactly once/);
   });
 });
 
@@ -290,34 +141,32 @@ describe("ConsoleSmsSender", () => {
 });
 
 describe("createSmsSender factory", () => {
-  it("returns Msg91SmsSender when smsProvider is msg91", () => {
-    const sender = createSmsSender({
-      smsProvider: "msg91",
-      msg91AuthKey: "auth-key",
-      msg91TemplateId: "tmpl-id",
-    });
+  const snsConfig = {
+    smsProvider: "sns" as const,
+    awsRegion: "ap-south-1",
+    snsSmsSenderId: "AGRWAL",
+    snsSmsEntityId: "1201000000000012345",
+    snsSmsTemplateId: "1207168000000054321",
+    snsSmsOtpMessage: "Code {otp}",
+  };
 
-    expect(sender).toBeInstanceOf(Msg91SmsSender);
+  it("returns SnsSmsSender when smsProvider is sns", () => {
+    expect(createSmsSender(snsConfig)).toBeInstanceOf(SnsSmsSender);
   });
 
-  it("throws if msg91 credentials are missing when smsProvider is msg91", () => {
-    expect(() =>
-      createSmsSender({
-        smsProvider: "msg91",
-      }),
-    ).toThrow(/MSG91_AUTH_KEY is required/);
-
-    expect(() =>
-      createSmsSender({
-        smsProvider: "msg91",
-        msg91AuthKey: "auth-key",
-      }),
-    ).toThrow(/MSG91_TEMPLATE_ID is required/);
+  it("throws if SNS settings are missing when smsProvider is sns", () => {
+    expect(() => createSmsSender({ ...snsConfig, snsSmsSenderId: undefined })).toThrow(
+      /SNS_SMS_SENDER_ID is required/,
+    );
+    expect(() => createSmsSender({ ...snsConfig, snsSmsOtpMessage: "" })).toThrow(
+      /SNS_SMS_OTP_MESSAGE is required/,
+    );
   });
 
   it("returns ConsoleSmsSender when smsProvider is console", () => {
     const sender = createSmsSender({
       smsProvider: "console",
+      awsRegion: "ap-south-1",
       nodeEnv: "development",
     });
 
@@ -325,92 +174,92 @@ describe("createSmsSender factory", () => {
   });
 });
 
+const VALID_SNS_ENV = {
+  SNS_SMS_SENDER_ID: "AGRWAL",
+  SNS_SMS_ENTITY_ID: "1201000000000012345",
+  SNS_SMS_TEMPLATE_ID: "1207168000000054321",
+  SNS_SMS_OTP_MESSAGE: "Your Agrawal Samaj verification code is {otp}. Valid for 5 minutes.",
+};
+
+function configIssues(env: NodeJS.ProcessEnv): ConfigError {
+  let thrown: unknown;
+  try {
+    loadConfig(env);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(ConfigError);
+  return thrown as ConfigError;
+}
+
 describe("Configuration validation for SMS and OTP", () => {
   it("rejects console SMS provider in production", () => {
-    const env: NodeJS.ProcessEnv = {
+    const configError = configIssues({
       ...baseTestEnvironment(),
+      ...VALID_SNS_ENV,
       NODE_ENV: "production",
       SMS_PROVIDER: "console",
-      MSG91_AUTH_KEY: "auth-key",
-      MSG91_TEMPLATE_ID: "tmpl-id",
-    };
-
-    let thrown: unknown;
-    try {
-      loadConfig(env);
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeInstanceOf(ConfigError);
-    const configError = thrown as ConfigError;
+    });
     const issue = configError.issues.find((i) => i.variable === "SMS_PROVIDER");
     expect(issue?.message).toMatch(/not permitted in production/i);
   });
 
-  it("rejects missing MSG91 variables in production", () => {
-    const env: NodeJS.ProcessEnv = {
+  it("rejects missing SNS variables in production", () => {
+    const configError = configIssues({
       ...baseTestEnvironment(),
       NODE_ENV: "production",
-      SMS_PROVIDER: "msg91",
-    };
-    delete env.MSG91_AUTH_KEY;
-    delete env.MSG91_TEMPLATE_ID;
-
-    let thrown: unknown;
-    try {
-      loadConfig(env);
-    } catch (error) {
-      thrown = error;
+      SMS_PROVIDER: "sns",
+    });
+    for (const variable of Object.keys(VALID_SNS_ENV)) {
+      const issue = configError.issues.find((i) => i.variable === variable);
+      expect(issue?.message).toMatch(/required in production/i);
     }
-
-    expect(thrown).toBeInstanceOf(ConfigError);
-    const configError = thrown as ConfigError;
-    const authKeyIssue = configError.issues.find((i) => i.variable === "MSG91_AUTH_KEY");
-    const templateIdIssue = configError.issues.find((i) => i.variable === "MSG91_TEMPLATE_ID");
-    expect(authKeyIssue?.message).toMatch(/required in production/i);
-    expect(templateIdIssue?.message).toMatch(/required in production/i);
   });
 
-  it("accepts valid MSG91 configuration in production", () => {
-    const env: NodeJS.ProcessEnv = {
+  it("rejects an OTP message without exactly one {otp} placeholder", () => {
+    const configError = configIssues({
       ...baseTestEnvironment(),
-      NODE_ENV: "production",
-      SMS_PROVIDER: "msg91",
-      MSG91_AUTH_KEY: "auth-key-valid",
-      MSG91_TEMPLATE_ID: "tmpl-valid-123",
-      MSG91_OTP_VAR: "custom_otp",
-    };
+      ...VALID_SNS_ENV,
+      SMS_PROVIDER: "sns",
+      SNS_SMS_OTP_MESSAGE: "Your code is {#var#}",
+    });
+    const issue = configError.issues.find((i) => i.variable === "SNS_SMS_OTP_MESSAGE");
+    expect(issue?.message).toMatch(/exactly once/);
+  });
 
-    const config = loadConfig(env);
-    expect(config.smsProvider).toBe("msg91");
-    expect(config.msg91AuthKey).toBe("auth-key-valid");
-    expect(config.msg91TemplateId).toBe("tmpl-valid-123");
-    expect(config.msg91OtpVar).toBe("custom_otp");
+  it("accepts valid SNS configuration in production", () => {
+    const config = loadConfig({
+      ...baseTestEnvironment(),
+      ...VALID_SNS_ENV,
+      NODE_ENV: "production",
+      SMS_PROVIDER: "sns",
+    });
+    expect(config.smsProvider).toBe("sns");
+    expect(config.snsSmsSenderId).toBe("AGRWAL");
+    expect(config.snsSmsEntityId).toBe("1201000000000012345");
+    expect(config.snsSmsTemplateId).toBe("1207168000000054321");
+    expect(config.snsSmsOtpMessage).toBe(VALID_SNS_ENV.SNS_SMS_OTP_MESSAGE);
   });
 
   it("accepts console provider outside production", () => {
-    const env: NodeJS.ProcessEnv = {
+    const config = loadConfig({
       ...baseTestEnvironment(),
       NODE_ENV: "development",
       SMS_PROVIDER: "console",
-    };
-
-    const config = loadConfig(env);
+    });
     expect(config.smsProvider).toBe("console");
-    expect(config.msg91OtpVar).toBe("otp");
   });
 
-  it("rejects missing MSG91 variables when SMS_PROVIDER=msg91 in development", () => {
-    const env: NodeJS.ProcessEnv = {
-      ...baseTestEnvironment(),
-      NODE_ENV: "development",
-      SMS_PROVIDER: "msg91",
-    };
-    delete env.MSG91_AUTH_KEY;
-    delete env.MSG91_TEMPLATE_ID;
+  it("rejects missing SNS variables when SMS_PROVIDER=sns in development", () => {
+    expect(() =>
+      loadConfig({ ...baseTestEnvironment(), NODE_ENV: "development", SMS_PROVIDER: "sns" }),
+    ).toThrow(/SNS_SMS_SENDER_ID/);
+  });
 
-    expect(() => loadConfig(env)).toThrow(/MSG91_AUTH_KEY/);
+  it("rejects the removed msg91 provider", () => {
+    expect(() =>
+      loadConfig({ ...baseTestEnvironment(), SMS_PROVIDER: "msg91" }),
+    ).toThrow(/SMS_PROVIDER/);
   });
 
   it("rejects missing OTP_HMAC_KEY", () => {

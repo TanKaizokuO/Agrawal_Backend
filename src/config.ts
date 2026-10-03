@@ -90,7 +90,7 @@ const otpHmacKey = requiredText.superRefine((value, context) => {
 
 const smsProviderValue = z.preprocess(
   (value) => (typeof value === "string" && value.trim() !== "" ? value.trim().toLowerCase() : undefined),
-  z.enum(["msg91", "console"]).default("console"),
+  z.enum(["sns", "console"]).default("console"),
 );
 
 export const configSchema = z.object({
@@ -147,9 +147,10 @@ export const configSchema = z.object({
   donorDailyAlertCap: nonNegativeInteger.default(3),
   workersEnabled: booleanValue.default(true),
   smsProvider: smsProviderValue,
-  msg91AuthKey: requiredText.optional(),
-  msg91TemplateId: requiredText.optional(),
-  msg91OtpVar: requiredText.default("otp"),
+  snsSmsSenderId: requiredText.optional(),
+  snsSmsEntityId: requiredText.optional(),
+  snsSmsTemplateId: requiredText.optional(),
+  snsSmsOtpMessage: requiredText.optional(),
   otpHmacKey,
 });
 
@@ -225,9 +226,10 @@ const ENV_NAME_BY_FIELD: Record<keyof typeof configSchema.shape, string> = {
   donorDailyAlertCap: "DONOR_DAILY_ALERT_CAP",
   workersEnabled: "WORKERS_ENABLED",
   smsProvider: "SMS_PROVIDER",
-  msg91AuthKey: "MSG91_AUTH_KEY",
-  msg91TemplateId: "MSG91_TEMPLATE_ID",
-  msg91OtpVar: "MSG91_OTP_VAR",
+  snsSmsSenderId: "SNS_SMS_SENDER_ID",
+  snsSmsEntityId: "SNS_SMS_ENTITY_ID",
+  snsSmsTemplateId: "SNS_SMS_TEMPLATE_ID",
+  snsSmsOtpMessage: "SNS_SMS_OTP_MESSAGE",
   otpHmacKey: "OTP_HMAC_KEY",
 };
 
@@ -288,23 +290,28 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Config
     });
   }
 
-  if (isProduction || provider === "msg91") {
-    const authKey = environment.MSG91_AUTH_KEY?.trim();
-    if (authKey === undefined || authKey === "") {
-      issues.push({
-        variable: "MSG91_AUTH_KEY",
-        message: isProduction
-          ? "is required in production"
-          : "is required when SMS_PROVIDER=msg91",
-      });
+  if (isProduction || provider === "sns") {
+    for (const variable of [
+      "SNS_SMS_SENDER_ID",
+      "SNS_SMS_ENTITY_ID",
+      "SNS_SMS_TEMPLATE_ID",
+      "SNS_SMS_OTP_MESSAGE",
+    ]) {
+      const value = environment[variable]?.trim();
+      if (value === undefined || value === "") {
+        issues.push({
+          variable,
+          message: isProduction
+            ? "is required in production"
+            : "is required when SMS_PROVIDER=sns",
+        });
+      }
     }
-    const templateId = environment.MSG91_TEMPLATE_ID?.trim();
-    if (templateId === undefined || templateId === "") {
+    const otpMessage = environment.SNS_SMS_OTP_MESSAGE?.trim();
+    if (otpMessage !== undefined && otpMessage !== "" && otpMessage.split("{otp}").length !== 2) {
       issues.push({
-        variable: "MSG91_TEMPLATE_ID",
-        message: isProduction
-          ? "is required in production"
-          : "is required when SMS_PROVIDER=msg91",
+        variable: "SNS_SMS_OTP_MESSAGE",
+        message: "must contain {otp} exactly once",
       });
     }
   }

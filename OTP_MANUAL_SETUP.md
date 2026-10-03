@@ -1,15 +1,15 @@
 # OTP Login — Manual Setup Checklist
 
 **For:** Kush
-**Date:** 3 October 2026
+**Date:** 4 October 2026
 
 ## Background
 
-OTP login has been rebuilt. The backend now generates the 6-digit code itself, stores it hashed, expires it after 5 minutes, and sends it by SMS through **MSG91**. Both the mobile app and the web app use this flow. Firebase phone login and the fixed test code `123456` have been removed.
+OTP login has been rebuilt. The backend now generates the 6-digit code itself, stores it hashed, expires it after 5 minutes, and sends it by SMS through **Amazon SNS**. Both the mobile app and the web app use this flow. Firebase phone login and the fixed test code `123456` have been removed.
 
-The code is finished and tested locally. What's left needs accounts, legal documents or production access, so it has to be done by hand. Decision record: ADR-0033, `docs/adr/0033-backend-sms-otp-and-msg91.md` in the [Agrawal_App](https://github.com/TanKaizokuO/Agrawal_App) repo.
+The code is finished and tested locally. What's left needs accounts, legal documents or production access, so it has to be done by hand. Decision records: ADR-0033 and ADR-0034 (`docs/adr/0034-sms-otp-delivery-via-amazon-sns.md` in the [Agrawal_App](https://github.com/TanKaizokuO/Agrawal_App) repo).
 
-The five new production settings are already declared in Terraform (`deploy/terraform/kms_ssm.tf:119-123` in this repo). You only need to fill in their values. That Terraform change hasn't been validated yet, so **run `terraform validate` before `terraform apply`**.
+The production settings are declared in Terraform (`deploy/terraform/kms_ssm.tf` in this repo), and the EC2 role (`deploy/terraform/ec2.tf`) includes `sns:Publish` permission for the production host. You only need to fill in their values. Run `terraform validate` before `terraform apply`.
 
 ---
 
@@ -27,27 +27,30 @@ Indian carriers only deliver SMS from registered senders and templates. Register
 
   Keep "5 minutes": the backend expires codes after 300 seconds. You get a **DLT template ID**.
 
-## 2. MSG91 account
+## 2. AWS End User Messaging SMS / Amazon SNS setup
 
-- [ ] Sign up, complete KYC, and recharge (minimum ₹1,250 + GST).
-- [ ] In MSG91's DLT settings, enter the **PEID**, **sender header** and **DLT template ID** from step 1.
-- [ ] Create a **Flow** template with exactly the same text, using `##otp##` where the code goes. If you name the variable something other than `otp`, use that name for `MSG91_OTP_VAR` below.
-- [ ] Copy the **auth key** and the **Flow template ID**.
-- [ ] If you turn on MSG91's IP whitelisting, add the production server's IP.
+- [ ] In the AWS End User Messaging SMS / Amazon SNS console for India (`ap-south-1`):
+  - Register the **Sender ID** matching the DLT-approved 6-character header (`SNS_SMS_SENDER_ID`).
+  - Register the **Entity ID (PEID)** (`SNS_SMS_ENTITY_ID`).
+  - Register the **Template ID** (`SNS_SMS_TEMPLATE_ID`).
+- [ ] Request production access to exit the AWS SMS sandbox and raise the monthly SMS spend limit via AWS Support.
+- [ ] Verify that the EC2 instance role (`deploy/terraform/ec2.tf`) has `sns:Publish` permission attached. (Parent is adding this policy to Terraform).
+- [ ] Note: Live SNS delivery has not been verified yet on production.
 
 ## 3. Production secrets
 
 The repo has two deploy paths. Set the values in **whichever one is actually used**:
 
 - **`deploy.sh`** reads SSM parameters `/agrawal/production/*`. Run `terraform apply` to create the placeholder parameters, then overwrite them with `aws ssm put-parameter --overwrite` (use `--type SecureString` for the secret ones).
-- **`deploy.yml`** reads Secrets Manager `prod/agrawal/env`. Add the same five keys there.
+- **`deploy.yml`** reads Secrets Manager `prod/agrawal/env`. Add the same keys there.
 
 | Key | Value |
 |---|---|
-| `SMS_PROVIDER` | `msg91` |
-| `MSG91_AUTH_KEY` | MSG91 auth key (**SecureString**) |
-| `MSG91_TEMPLATE_ID` | MSG91 Flow template ID |
-| `MSG91_OTP_VAR` | `otp` |
+| `SMS_PROVIDER` | `sns` |
+| `SNS_SMS_SENDER_ID` | DLT-approved 6-character sender ID header (e.g. `AGRSMJ`) |
+| `SNS_SMS_ENTITY_ID` | DLT Principal Entity ID (PEID) |
+| `SNS_SMS_TEMPLATE_ID` | DLT Content Template ID |
+| `SNS_SMS_OTP_MESSAGE` | Exact DLT-approved text with `{otp}` placeholder (e.g. `{#var#}` in DLT becomes `{otp}`: `{otp} is your OTP to log in to Agrawal Samaj. It is valid for 5 minutes. Do not share it with anyone. - AGRSMJ`) |
 | `OTP_HMAC_KEY` | output of `openssl rand -base64 32` (**SecureString**; generate once and never change it, or every unused code becomes invalid) |
 
 > If any key is missing or still says `PLACEHOLDER_SET_BY_OPERATOR`, the backend refuses to start. That's intentional.

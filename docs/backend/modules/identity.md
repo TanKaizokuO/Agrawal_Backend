@@ -77,8 +77,8 @@ The first Officer and Operator (Mr Rahul, ADR-0016) are granted by a one-off see
 
 ## Rules
 
-1. **OTP generation & verification (ADR-0033)**:
-   - Request OTP (`POST /v1/auth/otp`): Generates a 6-digit cryptographic code (TTL 300s, max 5 attempts, 30s resend cooldown). Hashed via HMAC-SHA256 (`OTP_HMAC_KEY`) and stored in `OtpChallenge`. Delivered via MSG91 Flow API (or console in dev).
+1. **OTP generation & verification (ADR-0033, ADR-0034)**:
+   - Request OTP (`POST /v1/auth/otp`): Generates a 6-digit cryptographic code (TTL 300s, max 5 attempts, 30s resend cooldown). Hashed via HMAC-SHA256 (`OTP_HMAC_KEY`) and stored in `OtpChallenge`. Delivered via Amazon SNS (or console in dev).
    - Session creation (`POST /v1/auth/session`): Verifies `authentication: { kind: "SMS_OTP", phoneE164, otp }` against the active unconsumed challenge. Code mismatch → `401 OTP_INVALID`. Exceeded attempts (≥5) → `429 OTP_ATTEMPTS_EXCEEDED`. Expired code → `401 OTP_INVALID`.
 2. **Principal resolution** on session creation, by `phone_number`:
    - An ACTIVE Member holds the phone → Member principal.

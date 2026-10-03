@@ -19,9 +19,11 @@ Remaining checks:
 3. **OPEN — privilege guarantees unverified.** The conditional tests attempt direct `SELECT`/`DELETE` on restricted tables and `DELETE` on `processing_record`, but no `UPDATE` attempt; all four were skipped. The RDS read-only evidence establishes only the role and migration status.
 4. **OPEN — not exhaustively proved.** The PostgreSQL 15 suite passed its existing tests, but no evidence here demonstrates that every raw SQL trigger, partial unique index, immutable field, succession transaction, webhook replay and erasure-retention path was exercised against the intended PostgreSQL 18 RDS runtime role.
 5. **OPEN — runtime schedule check.** Source and `main.ts` register 14 recurring handlers, including `bloodSos.processPending`; the current `test/jobs.test.ts` schedule fixture covers only 13 and omits that Blood SOS cron. Verify all 14 are installed once and have recent successful pg-boss runs in the intended environment.
-6. **OPEN — directory `gotra` query removed, tests not rerun.** The working tree (2026-10-03) removes the `gotra` query from `GET /v1/directory/members` in `src/modules/register/schemas.ts`, `src/modules/register/service.ts`, `openapi.json` and `openapi/v1.yaml`. The register-directory tests did not run because no test database URL was set. The 196 passed / 4 skipped count in the status paragraph below does not cover this change. Unproven.
+6. ~~**OPEN — directory `gotra` query removed, tests not rerun.**~~ *(Completed Oct 4, 2026 — local PostgreSQL 18.6 / Node 24.21.0 suite, register-directory tests included: 231 passed, 4 skipped; 33 test files passed and 1 skipped. Backend `e1e5593`.)*
 
 Verification status (2026-10-03): backend merge with remote `87928f6` is complete; `b7bd2f8` is included in `eeb5dfce61c2b4a0dc010fe72ce984d1c42d2802` history. Backend `main` `eeb5dfc` was pushed and deployed successfully via https://github.com/TanKaizokuO/Agrawal_Backend/actions/runs/36995862058 (self-hosted production workflow, server identity, no local AWS credentials). After the pilot source changes and an Officer-service wiring correction, the latest local suite on isolated PostgreSQL 15 / Node 22.23.3 is **196 tests passed, 4 skipped; 31 test files passed and 1 skipped**. Typecheck, lint, build and OpenAPI generation passed. The four skipped application-role tests require `TEST_APP_DATABASE_URL`. On 2026-10-03 the same suite at `6fe07e1` (no source change since `fe41dab`) passed **196 tests, 4 skipped** on a local PostgreSQL 18.6 container with Node 24.21.0. This is local PostgreSQL 18 / Node 24 suite proof. It is not RDS runtime-role or app-role proof. Earlier merged-tree evidence was 189 passed / 4 skipped (pre-pilot); historical `6429927` evidence was 153 passed / 4 skipped; historical `9aa8e06` PG 18.6 evidence was 145 passed / 4 skipped. Compiled local pilot HTTP smoke passed: wrong OTP 401; unpaid founder CREATE 201 with real Member/Family, auth/me 200, me 200, null payment, no capture, payment-order 409 (no vendor); JOIN 202 AWAITING_HEAD with GET unpaid deferral; restart with policy true: restored founder Member, pending join Applicant sees paymentRequired true / paymentDeferred true, new unpaid submission 409 REGISTRATION_NOT_PAID (no Member created), Head approves old unpaid join 201 with real Member, auth/me 200, me 200; all three sessions logout 204, revoked 401. Production runs `fe41dab` with the `REGISTRATION_PAYMENT_REQUIRED=false` pilot override, deployed by run https://github.com/TanKaizokuO/Agrawal_Backend/actions/runs/37033459787; the live pilot smoke passed (see §3 deployment evidence). Deployment-local dispatch overrides do not persist to Secrets Manager; a subsequent ordinary deployment restores the stored value (or the default `true` when absent). No Firebase SMS, native-device, live-payment, FCM or romanization proof is claimed. Each suite creates and drops its own `test_<pid>_<uuid>` database, requiring `CREATEDB`. The remote-host test override is not approval to run destructive tests against RDS.
+
+Verification status (2026-10-04): on local PostgreSQL 18.6 / Node 24.21.0, with the uncommitted SNS SMS change (ADR-0034) in the working tree, the suite gives **231 tests passed, 4 skipped; 33 test files passed and 1 skipped**. Typecheck and lint passed. The four skipped application-role tests still require `TEST_APP_DATABASE_URL`.
 
 ## 2. Operator facts and ADR follow-through
 
@@ -47,22 +49,25 @@ Create separate staging and production values. Store production/staging secrets 
 
 **Status for the provider/account work below: open or unverified.** Required secret names and setup steps are not proof that credentials are absent or present; this audit did not inspect provider consoles, secret stores, cloud resources or real devices.
 
-### FCM Push Notifications and MSG91 SMS OTP (ADR-0033)
+### FCM Push Notifications and Amazon SNS SMS OTP (ADR-0034)
 
 Required:
 
 - `FIREBASE_PROJECT_ID` (FCM push notifications only)
 - `FIREBASE_SERVICE_ACCOUNT_JSON` (FCM push notifications only)
-- `SMS_PROVIDER=msg91` (or `console` in dev)
-- `MSG91_AUTH_KEY`
-- `MSG91_TEMPLATE_ID`
-- `MSG91_OTP_VAR` (default `otp`)
+- `SMS_PROVIDER=sns` (or `console` in dev)
+- `SNS_SMS_SENDER_ID` (DLT-approved 6-char header)
+- `SNS_SMS_ENTITY_ID` (DLT PEID)
+- `SNS_SMS_TEMPLATE_ID` (DLT content template ID)
+- `SNS_SMS_OTP_MESSAGE` (exact DLT-approved text with `{otp}` placeholder)
 - `OTP_HMAC_KEY` (base64 string of 32+ bytes)
 
 Provider work:
 
 - Complete Indian DLT registration (PEID, sender header, OTP content template with `{#var#}`).
-- Create MSG91 account and configure Flow template mapped to DLT template ID.
+- Register Sender ID, PEID, and Template ID in AWS End User Messaging SMS console (`ap-south-1`).
+- Move AWS account out of SMS sandbox and raise monthly SMS spend limit via AWS Support.
+- Grant `sns:Publish` permission to production EC2 host role.
 - Enable/configure FCM for Android and iOS (push notifications).
 - Restrict service-account IAM to messaging operations only.
 - Populate secrets in AWS SSM (`/agrawal/<env>/...`).
@@ -173,7 +178,7 @@ After infrastructure and secrets exist:
 
 1. Push/apply the migration and verify `/healthz` and `/readyz`.
 2. Run the complete API test suite against staging-equivalent PostgreSQL.
-3. Verify backend SMS OTP login (`POST /v1/auth/otp` and `POST /v1/auth/session`), restoration and revocation in the intended environment (ADR-0033).
+3. Verify backend SMS OTP login (`POST /v1/auth/otp` and `POST /v1/auth/session`), restoration and revocation in the intended environment (ADR-0033, ADR-0034).
 4. Complete founding and joining flows with Razorpay test payments, Head confirmation, webhook replay, refund paths, Family minting, and role changes (payment flow verification deferred until post-publication credentials).
 5. Verify private media upload/access, screening behavior, Officer removal, and object cleanup.
 6. Verify directory projections, nominee access logging, succession, archival, and erasure into `restricted` storage.
