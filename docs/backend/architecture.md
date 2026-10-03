@@ -16,7 +16,7 @@ The cross-cutting shape of the API (`Agrawal_Backend/`). Module-specific rules l
 | Logging | pino + pino-http | JSON logs, request ID on every line, redaction list below. |
 | Security headers | helmet | Default config; API serves JSON only. |
 | Tests | vitest + supertest | Against a real Postgres. |
-| Phone/session auth | Firebase Phone Auth exchange for WEB; fixed OTP `123456` for MOBILE | WEB Firebase ID tokens are verified server-side. Mobile creates a persisted PostgreSQL session with a 90-day sliding bearer lifetime; the fixed code sends no SMS and does not prove phone ownership. |
+| Phone/session auth | SMS OTP via MSG91 Flow API (backend-generated, HMAC-SHA256 hashed) | `POST /v1/auth/otp` delivers 6-digit code via MSG91; `POST /v1/auth/session` exchanges `{ client, authentication: { kind: "SMS_OTP", phoneE164, otp } }` for an opaque session (HTTP-only cookie for WEB, 90-day sliding bearer token for MOBILE). ADR-0033. |
 | Payments | `razorpay` (Razorpay's first-party Node SDK) for orders, payments, refunds | Webhook signatures verified with `node:crypto` HMAC over the raw body. |
 | Storage | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | Private bucket; presigned GET URLs. |
 | Image processing | `sharp` | Re-encode every upload. |
@@ -142,8 +142,13 @@ Payments must not import Registration or Noticeboards. It announces a captured o
 | `WEB_ORIGINS` | Required; no default | Comma-separated exact origins for CORS and CSRF. |
 | `SESSION_TTL_WEB_DAYS` | `30` | Sliding. |
 | `SESSION_TTL_MOBILE_DAYS` | `90` | Sliding. |
-| `FIREBASE_PROJECT_ID` | | |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | | From SSM. |
+| `FIREBASE_PROJECT_ID` | | FCM push notifications only. |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | | From SSM (FCM push notifications only). |
+| `SMS_PROVIDER` | `console` | `msg91` (required in production) or `console` (local/dev only; rejected in production). |
+| `MSG91_AUTH_KEY` | | MSG91 Flow API auth key. |
+| `MSG91_TEMPLATE_ID` | | MSG91 Flow template ID mapped to DLT template ID. |
+| `MSG91_OTP_VAR` | `otp` | Template variable name for the OTP code. |
+| `OTP_HMAC_KEY` | 32+ bytes, base64 | HMAC-SHA256 key for hashing OTP codes in `OtpChallenge`. |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | | Test keys on staging, live on production. |
 | `RAZORPAY_WEBHOOK_SECRET` | | |
 | `REGISTRATION_PAYMENT_PAISE` | `100` | ₹1 (ADR-0016). |
@@ -176,11 +181,13 @@ Tuning values live in config with the defaults given in module files, never as l
 
 ### Authentication sessions
 
-`POST /v1/auth/session` accepts either the established Firebase request `{ firebaseIdToken, client }` or the mobile-only fixed-code request `{ phoneE164, otp: "123456", client: "MOBILE" }`. The fixed request validates Indian E.164 phone format and a six-digit code, accepts only `123456`, and rejects Firebase-plus-phone payloads and WEB fixed-code requests. WEB continues to authenticate with Firebase and receives a secure HTTP-only session cookie.
+Authentication is backend-authoritative for both WEB and MOBILE via SMS OTP (ADR-0033):
 
-For MOBILE, the server checks the submitted phone against the register: an active Member gets a Member session, an archived Member is denied, and a new number opens the existing Registration as an Applicant. The database stores a hash of the bearer token in the session row; `/v1/auth/me` restores the current principal, the 90-day MOBILE session lifetime slides on activity, and `DELETE /v1/auth/session` revokes it.
+1. `POST /v1/auth/otp`: Accepts `{ client: "WEB" | "MOBILE", phoneE164: string }`. Generates a cryptographic 6-digit OTP (TTL 300s, max 5 attempts, 30s resend cooldown, rate limits 5/hour per phone and 20/hour per IP), hashes it with HMAC-SHA256 using `OTP_HMAC_KEY`, stores it in Prisma model `OtpChallenge`, and dispatches it via MSG91 Flow API (or logs to console if `SMS_PROVIDER=console` in development). Returns `202 Accepted` with `{ expiresInSeconds: 300, resendAfterSeconds: 30 }`.
+2. `POST /v1/auth/session`: Accepts `{ client: "WEB" | "MOBILE", authentication: { kind: "SMS_OTP", phoneE164: string, otp: string } }`. Verifies the code against the active `OtpChallenge`. Upon verification, resolves the principal: an active Member gets a Member session, an archived Member is denied (`403 PHONE_BELONGS_TO_ARCHIVED_MEMBER`), and an unverified number opens or resumes Registration as an Applicant. Sets an HTTP-only `sid` cookie for WEB and returns a bearer token for MOBILE (90-day sliding TTL).
+3. Session restore & revocation: `/v1/auth/me` restores the current principal, and `DELETE /v1/auth/session` revokes it.
 
-**Security and release requirement:** `123456` is deliberately fixed, shared, and not sent by SMS. It is not evidence that a person controls the supplied phone number; anyone who learns the code can claim any number, including a Member's. Treat this as intentionally insecure and require explicit Operator acceptance before production deployment. Replace it with delivered OTP verification before phone ownership is relied on. Deploy the backend support before shipping the Flutter client because older API versions reject this request shape.
+Auth error codes: `OTP_INVALID` 401, `OTP_ATTEMPTS_EXCEEDED` 429, `OTP_DELIVERY_FAILED` 502, `RATE_LIMITED` 429, `VALIDATION_FAILED` 400.
 
 ### Error envelope
 
@@ -274,7 +281,7 @@ pino with a redaction list covering: `req.headers.authorization`, `req.headers.c
 |---|---|---|
 | Compute | Docker Compose stack `api-staging` on the shared EC2 `t3.small` | Stack `api-prod` on the same instance |
 | Database | RDS instance, database `agrawal_staging`, its own roles | Same RDS instance, database `agrawal_prod`, its own roles |
-| Firebase | Project `…-staging` | Project `…-prod`, India enabled in SMS region policy |
+| Firebase & SMS | FCM for push; MSG91 test/console | FCM for push; MSG91 live Flow with DLT approved template |
 | Razorpay | Test keys, test webhook | Live keys, live webhook |
 | S3 | Bucket `…-media-staging` | Bucket `…-media-prod` |
 | Host | `staging-api.<domain>` | `api.<domain>` |
@@ -288,7 +295,7 @@ pino with a redaction list covering: `req.headers.authorization`, `req.headers.c
 
 ### Web hosting note
 
-`Agrawal_Frontend/apps/web` is not built by this plan, but the API depends on two facts about it: it is served from `https://register.<domain>` (or another subdomain of the API's domain), and that origin is in `WEB_ORIGINS` and in the Firebase project's authorized domains. `localhost` is not an authorized phone-auth domain (ADR-0014 §8); local web development against real OTP uses the staging host.
+`Agrawal_Frontend/apps/web` is not built by this plan, but the API depends on two facts about it: it is served from `https://register.<domain>` (or another subdomain of the API's domain), and that origin is in `WEB_ORIGINS` for CORS/CSRF. Auth OTP is handled via the backend MSG91 Flow API (`POST /v1/auth/otp`), eliminating Firebase authorized domain constraints for web (ADR-0033); local web development uses `SMS_PROVIDER=console`.
 
 ## Security checklist (M13, and reviewed at M5)
 

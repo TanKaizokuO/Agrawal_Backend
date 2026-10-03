@@ -1,14 +1,4 @@
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import type { App } from "firebase-admin/app";
-import {
-  createFirebasePhoneTokenVerifier,
-  type FirebaseAuthPort,
-  type FirebaseDecodedIdToken,
-} from "./firebase.js";
-import type { PhoneTokenVerifier } from "./ports.js";
 import { isRecord } from "./guards.js";
-import { assertFirebaseAppMatchesProject } from "./firebase-app.js";
 
 export interface FirebaseRuntimeOptions {
   readonly projectId: string;
@@ -57,58 +47,3 @@ export function normalizedFirebaseServiceAccountJson(value: string): string {
   });
 }
 
-function appFor(options: FirebaseRuntimeOptions, account: FirebaseServiceAccount): App {
-  const name = `agrawal-api-${options.environment}`;
-  const projectId = options.projectId || account.projectId;
-  const existing = getApps().find((candidate) => candidate.name === name);
-  const app = existing === undefined
-    ? initializeApp(
-      {
-        credential: cert({
-          projectId,
-          clientEmail: account.clientEmail,
-          privateKey: account.privateKey,
-        }),
-        projectId,
-      },
-      name,
-    )
-    : existing;
-  if (existing !== undefined) assertFirebaseAppMatchesProject(app, projectId);
-  return app;
-}
-
-interface FirebaseAuthClient {
-  verifyIdToken(idToken: string, checkRevoked: true): Promise<{
-    readonly uid: string;
-    readonly phone_number?: string;
-    readonly auth_time?: number;
-    readonly firebase?: {
-      readonly sign_in_provider?: string;
-    };
-  }>;
-}
-class FirebaseAuthAdapter implements FirebaseAuthPort {
-  public constructor(private readonly auth: FirebaseAuthClient) {}
-
-  public async verifyIdToken(
-    idToken: string,
-    checkRevoked: true,
-  ): Promise<FirebaseDecodedIdToken> {
-    const decoded = await this.auth.verifyIdToken(idToken, checkRevoked);
-    return {
-      uid: decoded.uid,
-      ...(decoded.phone_number === undefined ? {} : { phone_number: decoded.phone_number }),
-      ...(decoded.auth_time === undefined ? {} : { auth_time: decoded.auth_time }),
-      ...(decoded.firebase === undefined ? {} : { firebase: decoded.firebase }),
-    };
-  }
-}
-
-export function createFirebasePhoneVerifier(
-  options: FirebaseRuntimeOptions,
-): PhoneTokenVerifier {
-  const account = parseFirebaseServiceAccount(options.serviceAccountJson);
-  const app = appFor(options, account);
-  return createFirebasePhoneTokenVerifier(new FirebaseAuthAdapter(getAuth(app)));
-}

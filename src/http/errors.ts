@@ -31,13 +31,17 @@ export const ERROR_MESSAGES = {
     en: "The request body must use JSON.",
     hi: "अनुरोध का मुख्य भाग JSON होना चाहिए।",
   },
-  FIREBASE_TOKEN_INVALID: {
-    en: "The Firebase phone token is invalid.",
-    hi: "Firebase फ़ोन टोकन अमान्य है।",
+  OTP_INVALID: {
+    en: "The OTP is invalid or expired.",
+    hi: "OTP अमान्य या समाप्त हो गया है।",
   },
-  FIXED_OTP_INVALID: {
-    en: "The fixed mobile OTP is incorrect.",
-    hi: "मोबाइल OTP गलत है।",
+  OTP_ATTEMPTS_EXCEEDED: {
+    en: "Too many incorrect OTP attempts. Please request a new code.",
+    hi: "बहुत अधिक गलत OTP प्रयास। कृपया नया कोड मांगें।",
+  },
+  OTP_DELIVERY_FAILED: {
+    en: "Failed to deliver OTP via SMS.",
+    hi: "SMS द्वारा OTP भेजने में विफल।",
   },
   PHONE_BELONGS_TO_ARCHIVED_MEMBER: {
     en: "This phone belongs to an archived Member.",

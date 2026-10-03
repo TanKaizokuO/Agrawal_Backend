@@ -12,6 +12,7 @@ import { AppError } from "../../http/errors.js";
 import type { IdentityService } from "./service.js";
 import {
   CreateSessionBody,
+  RequestOtpBody,
   type PublicPrincipal,
 } from "./schemas.js";
 import {
@@ -20,6 +21,7 @@ import {
 } from "../../openapi/route-manifest.js";
 
 export const identityRouteManifest = defineRouteManifest({
+  requestOtp: { method: "post", path: "/v1/auth/otp" },
   createSession: { method: "post", path: "/v1/auth/session" },
   authMe: { method: "get", path: "/v1/auth/me" },
   deleteSession: { method: "delete", path: "/v1/auth/session" },
@@ -61,20 +63,26 @@ function currentPrincipal(request: Request): Principal {
 export function createIdentityRoutes(deps: IdentityRouteDeps): Router {
   const router = Router();
 
+  registerRoute(router, identityRouteManifest.requestOtp,
+    validate({ body: RequestOtpBody }),
+    async (request: Request, response: Response) => {
+      const body = RequestOtpBody.parse(request.body);
+      const result = await deps.service.requestOtp({
+        client: body.client,
+        phoneE164: body.phoneE164,
+        ipAddress: request.ip || "unknown",
+      });
+      response.status(202).json(result);
+    },
+  );
+
   registerRoute(router, identityRouteManifest.createSession,
     validate({ body: CreateSessionBody }),
     async (request: Request, response: Response) => {
       const body = CreateSessionBody.parse(request.body);
       const userAgent = request.get("User-Agent");
-      const authentication = "firebaseIdToken" in body
-        ? { kind: "FIREBASE" as const, idToken: body.firebaseIdToken }
-        : {
-            kind: "FIXED_OTP" as const,
-            phoneE164: body.phoneE164,
-            otp: body.otp,
-          };
       const created = await deps.service.createSession({
-        authentication,
+        authentication: body.authentication,
         client: body.client,
         ipAddress: request.ip || "unknown",
         ...(userAgent === undefined ? {} : { userAgent }),

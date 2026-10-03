@@ -106,18 +106,15 @@ function createPersistentIdentity(
 ): IdentityService {
   return new IdentityService({
     db,
-    verifier: {
-      verifyIdToken: (idToken) => Promise.resolve({
-        uid: idToken,
-        phoneE164: "+919876543210",
-        authTime: clock.now(),
-        signInProvider: "phone",
-      }),
-    },
+    smsSender: { sendOtp: () => Promise.resolve() },
     registration: { openForPhone: () => Promise.resolve({ registrationId: uuidv7() }) },
     register,
     clock,
-    config: { sessionTtlWebDays: 30, sessionTtlMobileDays: 90 },
+    config: {
+      sessionTtlWebDays: 30,
+      sessionTtlMobileDays: 90,
+      otpHmacKey: Buffer.alloc(32, 1).toString("base64"),
+    },
     processingRecord: { write: () => Promise.resolve() },
   });
 }

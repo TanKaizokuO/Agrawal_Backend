@@ -116,6 +116,11 @@ locals {
   operator_parameters = {
     FIREBASE_PROJECT_ID                 = { secure = false, description = "Firebase Project ID for Phone Authentication" }
     FIREBASE_SERVICE_ACCOUNT_JSON       = { secure = true, description = "Firebase Service Account JSON credentials" }
+    SMS_PROVIDER                        = { secure = false, description = "`msg91` for production; `console` dev-only" }
+    MSG91_AUTH_KEY                      = { secure = true, description = "MSG91 Flow API credentials" }
+    MSG91_TEMPLATE_ID                   = { secure = false, description = "MSG91 Flow template mapped to DLT template ID" }
+    MSG91_OTP_VAR                       = { secure = false, description = "template OTP variable name, default `otp`" }
+    OTP_HMAC_KEY                        = { secure = true, description = "HMAC-SHA256 key for OTP verification hashes" }
     RAZORPAY_KEY_ID                     = { secure = true, description = "Razorpay Key ID" }
     RAZORPAY_KEY_SECRET                 = { secure = true, description = "Razorpay Key Secret" }
     RAZORPAY_WEBHOOK_SECRET             = { secure = true, description = "Razorpay Webhook verification secret" }

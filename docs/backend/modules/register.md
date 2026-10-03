@@ -202,7 +202,7 @@ Family photo: not named in invariant 22, so it is visible to the Family's own Me
 
 After commit, a job deletes the S3 objects. The phone number is free again: the person may register afresh later, and their old Payment Identity no longer anchors a Family (unless succession kept the Family alive — then the anchor stays with the Family, per `payments.md`).
 
-**Stage 1 (Officer-executed):** `POST /v1/me/erasure` creates a `PENDING` ErasureRequest and returns `202`; the Officer executes it from the Officer route. Stage 2 (`ERASURE_SELF_SERVICE=true`): the same endpoint executes immediately when the body carries a Firebase ID token with `auth_time` in the last 5 minutes (re-authentication), returns `200`, and clears the cookie.
+**Stage 1 (Officer-executed):** `POST /v1/me/erasure` creates a `PENDING` ErasureRequest and returns `202`; the Officer executes it from the Officer route. Stage 2 (`ERASURE_SELF_SERVICE=true`): the same endpoint executes immediately when the body carries a fresh SMS OTP verification (re-authentication, ADR-0033), returns `200`, and clears the cookie.
 
 Withdrawing the directory-listing consent **is** an Erasure request (`CONTEXT.md`, Consent Toggle); there is no consent endpoint that sets `consentDirectory` false.
 

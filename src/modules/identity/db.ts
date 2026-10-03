@@ -25,6 +25,45 @@ export interface MemberRoleRow {
   readonly grantedAt: Date;
 }
 
+export interface OtpChallengeRow {
+  readonly id: string;
+  readonly phoneE164: string;
+  readonly codeHash: string;
+  readonly attempts: number;
+  readonly expiresAt: Date;
+  readonly consumedAt: Date | null;
+  readonly createdAt: Date;
+}
+
+export interface OtpChallengeWhereInput {
+  readonly id?: string;
+  readonly phoneE164?: string;
+  readonly consumedAt?: Date | null;
+  readonly expiresAt?: { readonly gt?: Date };
+  readonly attempts?: number | { readonly lt?: number; readonly gte?: number };
+}
+
+export type OtpChallengeOrderByInput = {
+  readonly createdAt?: "asc" | "desc";
+};
+
+export interface OtpChallengeDelegate {
+  findFirst(args?: {
+    readonly where?: OtpChallengeWhereInput;
+    readonly orderBy?: OtpChallengeOrderByInput;
+  }): Promise<OtpChallengeRow | null>;
+  create(args: { readonly data: Record<string, unknown> }): Promise<OtpChallengeRow>;
+  update(args: {
+    readonly where: { readonly id: string };
+    readonly data: Record<string, unknown>;
+  }): Promise<OtpChallengeRow>;
+  updateMany(args: {
+    readonly where: OtpChallengeWhereInput;
+    readonly data: Record<string, unknown>;
+  }): Promise<{ readonly count: number }>;
+  deleteMany(args: { readonly where: OtpChallengeWhereInput }): Promise<{ readonly count: number }>;
+}
+
 interface SessionIdWhere {
   readonly id: string;
 }
@@ -68,6 +107,9 @@ export interface MemberRoleDelegate {
 export interface IdentityTxClient {
   readonly session: SessionDelegate;
   readonly memberRole: MemberRoleDelegate;
+  readonly otpChallenge: OtpChallengeDelegate;
+  $executeRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
+  $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
 }
 
 export interface IdentityDatabase extends IdentityTxClient, RateLimitDatabase {

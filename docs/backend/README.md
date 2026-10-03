@@ -79,7 +79,7 @@ Today is 21 September; Stage 1 is 22 September. The Stage 1 and Stage 2 backend 
 Done when: `curl https://<staging-api-host>/readyz` returns 200 with the database reachable; CI is green on a PR; `openapi.json` regenerates identically in CI.
 
 **M1 — Identity.** Read `modules/identity.md`.
-- Firebase ID-token exchange, opaque sessions (cookie for web, bearer for mobile), principals (Applicant / Member), roles, CSRF origin check, Postgres-backed rate limiter.
+- Backend SMS OTP exchange (`POST /v1/auth/otp` and `POST /v1/auth/session`, ADR-0033), opaque sessions (cookie for web, bearer for mobile), principals (Applicant / Member), roles, CSRF origin check, Postgres-backed rate limiter.
 
 Done when: a phone on the staging web origin signs in with a real OTP and `GET /v1/auth/me` returns an Applicant principal; revoking the session row logs the phone out on the next request; every test in identity's list passes.
 
@@ -99,7 +99,7 @@ Done when: two phones on staging — one founds, one joins with that Family ID �
 Done when: the Officer, signed in on staging, clears a flag, removes an image (the Member sees the reason on `/v1/me`), and erases a Member — after which the Member's session is dead, their profile and images are gone, and their payment and consent rows sit in `restricted` with a `retainUntil`; each of those actions has a Processing Record row that cannot be updated or deleted by the app's database role.
 
 **M5 — Production cutover.** Read the Deployment section of `architecture.md`.
-- Production database `agrawal_prod`, production Firebase project with India enabled in the SMS region policy and the production web domain authorized, Razorpay **live** keys and live webhook secret, UPI Intent confirmed enabled on the Razorpay account, secrets in SSM, tagged release.
+- Production database `agrawal_prod`, production DLT registration and MSG91 Flow template setup (ADR-0033), Razorpay **live** keys and live webhook secret, UPI Intent confirmed enabled on the Razorpay account, secrets in SSM, tagged release.
 
 Done when: on production, a real phone pays a real ₹1, founds a Family, and the payment's `vpa` is recorded as its Payment Identity (if `vpa` is absent, record that fact in `open-questions.md` — it decides how many founders get flagged); that test Member is then erased by the Officer and the ₹1 refunded; RDS automated backups are on with 7-day retention.
 

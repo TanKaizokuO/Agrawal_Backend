@@ -4,7 +4,7 @@ Owns sign-in, sessions, principals and roles. Stage 1.
 
 ## What it does
 
-A person proves control of a phone with Firebase Phone Auth on the client; the API verifies the resulting Firebase ID token once, then issues its own opaque session (ADR-0014 §3). From then on the API never talks to Firebase for that person again until they sign in afresh.
+A person proves control of a phone by requesting a 6-digit OTP delivered via SMS (`POST /v1/auth/otp`) and submitting it for verification (`POST /v1/auth/session`). The API verifies the code against an active HMAC-SHA256 hashed `OtpChallenge`, then issues its own opaque session (ADR-0033).
 
 A session belongs to a **principal**, which is one of:
 - **Applicant** — a verified phone with no Member. Carries the current `registrationId`.
@@ -29,6 +29,16 @@ model Session {
   revokedReason String?                 // LOGOUT | ERASURE | ARCHIVAL | OFFICER | EXPIRED_IDLE
   userAgent    String?
   @@index([memberId])
+  @@index([phoneE164])
+}
+model OtpChallenge {
+  id         String    @id // uuid v7
+  phoneE164  String
+  codeHash   String    // hmac-sha256(otp, OTP_HMAC_KEY), hex
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
   @@index([phoneE164])
 }
 
@@ -67,7 +77,9 @@ The first Officer and Operator (Mr Rahul, ADR-0016) are granted by a one-off see
 
 ## Rules
 
-1. **Token verification**: `verifyIdToken(idToken, /* checkRevoked */ true)`; require `firebase.sign_in_provider === "phone"`, `phone_number` matching `^\+91[6-9]\d{9}$`, and `auth_time` within the last 10 minutes. Otherwise `401 FIREBASE_TOKEN_INVALID`.
+1. **OTP generation & verification (ADR-0033)**:
+   - Request OTP (`POST /v1/auth/otp`): Generates a 6-digit cryptographic code (TTL 300s, max 5 attempts, 30s resend cooldown). Hashed via HMAC-SHA256 (`OTP_HMAC_KEY`) and stored in `OtpChallenge`. Delivered via MSG91 Flow API (or console in dev).
+   - Session creation (`POST /v1/auth/session`): Verifies `authentication: { kind: "SMS_OTP", phoneE164, otp }` against the active unconsumed challenge. Code mismatch → `401 OTP_INVALID`. Exceeded attempts (≥5) → `429 OTP_ATTEMPTS_EXCEEDED`. Expired code → `401 OTP_INVALID`.
 2. **Principal resolution** on session creation, by `phone_number`:
    - An ACTIVE Member holds the phone → Member principal.
    - An ARCHIVED Member holds the phone → `403 PHONE_BELONGS_TO_ARCHIVED_MEMBER`.
@@ -86,7 +98,8 @@ The first Officer and Operator (Mr Rahul, ADR-0016) are granted by a one-off see
 
 | Method | Path | Auth | Body → Response |
 |---|---|---|---|
-| POST | `/v1/auth/session` | public | `{ firebaseIdToken, client: "WEB" \| "MOBILE" }` → `{ principal, token? }` (token only for MOBILE); sets cookie for WEB |
+| POST | `/v1/auth/otp` | public | `{ client: "WEB" \| "MOBILE", phoneE164 }` → `202`; `{ expiresInSeconds: 300, resendAfterSeconds: 30 }` |
+| POST | `/v1/auth/session` | public | `{ client: "WEB" \| "MOBILE", authentication: { kind: "SMS_OTP", phoneE164, otp } }` → `201`; `{ principal, token? }` (token only for MOBILE); sets cookie for WEB |
 | GET | `/v1/auth/me` | principal | → `{ principal }` |
 | DELETE | `/v1/auth/session` | principal | → `204`; revokes this session, clears cookie |
 
@@ -97,14 +110,16 @@ The first Officer and Operator (Mr Rahul, ADR-0016) are granted by a one-off see
 | { kind: "MEMBER", phoneE164: string, memberId: string, familyPublicId: string, roles: Role[], isHead: boolean }
 ```
 
-Module error codes: `FIREBASE_TOKEN_INVALID` 401, `PHONE_BELONGS_TO_ARCHIVED_MEMBER` 403, `SESSION_EXPIRED` 401.
+Module error codes: `OTP_INVALID` 401, `OTP_ATTEMPTS_EXCEEDED` 429, `OTP_DELIVERY_FAILED` 502, `RATE_LIMITED` 429, `VALIDATION_FAILED` 400, `PHONE_BELONGS_TO_ARCHIVED_MEMBER` 403, `SESSION_EXPIRED` 401.
 
 ## Default rate limits
 
 | Name | Key | Limit |
 |---|---|---|
+| `otp.send.phone` | phone number | 5 / hour |
+| `otp.send.ip` | client IP | 20 / hour |
 | `session.create.ip` | client IP | 30 / hour |
-| `session.create.phone` | phone from the verified token | 10 / hour |
+| `session.create.phone` | phone from verified OTP | 10 / hour |
 | `registration.paymentOrder` | registrationId | 5 / hour |
 | `registration.familyCheck` | session | 30 / hour |
 | `registration.submit` | registrationId | 10 / hour |

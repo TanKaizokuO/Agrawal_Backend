@@ -47,23 +47,25 @@ Create separate staging and production values. Store production/staging secrets 
 
 **Status for the provider/account work below: open or unverified.** Required secret names and setup steps are not proof that credentials are absent or present; this audit did not inspect provider consoles, secret stores, cloud resources or real devices.
 
-### Firebase Phone Authentication and FCM
+### FCM Push Notifications and MSG91 SMS OTP (ADR-0033)
 
 Required:
 
-- `FIREBASE_PROJECT_ID`
-- `FIREBASE_SERVICE_ACCOUNT_JSON`
-
-**Status: partly evidenced; provider/account and push work remain open.** The parent reports a successful real-auth smoke (see §1). The recorded handoff does not identify the Firebase project, region-policy or authorized-domain evidence, and does not report real-device FCM delivery or invalid-token deletion.
+- `FIREBASE_PROJECT_ID` (FCM push notifications only)
+- `FIREBASE_SERVICE_ACCOUNT_JSON` (FCM push notifications only)
+- `SMS_PROVIDER=msg91` (or `console` in dev)
+- `MSG91_AUTH_KEY`
+- `MSG91_TEMPLATE_ID`
+- `MSG91_OTP_VAR` (default `otp`)
+- `OTP_HMAC_KEY` (base64 string of 32+ bytes)
 
 Provider work:
 
-- Create or select the Firebase projects.
-- Enable Phone Authentication and configure the India SMS region policy.
-- Add the final web domains to Firebase authorized domains.
-- Enable/configure FCM for Android and iOS.
-- Restrict service-account IAM to the required authentication and messaging operations.
-- Capture the provider/configuration evidence for the reported real-auth smoke if not already recorded; verify real-device FCM delivery and invalid-token deletion.
+- Complete Indian DLT registration (PEID, sender header, OTP content template with `{#var#}`).
+- Create MSG91 account and configure Flow template mapped to DLT template ID.
+- Enable/configure FCM for Android and iOS (push notifications).
+- Restrict service-account IAM to messaging operations only.
+- Populate secrets in AWS SSM (`/agrawal/<env>/...`).
 
 ### Razorpay
 
@@ -171,7 +173,7 @@ After infrastructure and secrets exist:
 
 1. Push/apply the migration and verify `/healthz` and `/readyz`.
 2. Run the complete API test suite against staging-equivalent PostgreSQL.
-3. Verify fixed-code MOBILE login, restoration and revocation in the intended environment, and independently verify Firebase WEB authentication. Fixed OTP sends no SMS and does not establish phone ownership.
+3. Verify backend SMS OTP login (`POST /v1/auth/otp` and `POST /v1/auth/session`), restoration and revocation in the intended environment (ADR-0033).
 4. Complete founding and joining flows with Razorpay test payments, Head confirmation, webhook replay, refund paths, Family minting, and role changes (payment flow verification deferred until post-publication credentials).
 5. Verify private media upload/access, screening behavior, Officer removal, and object cleanup.
 6. Verify directory projections, nominee access logging, succession, archival, and erasure into `restricted` storage.

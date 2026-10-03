@@ -19,6 +19,21 @@ model Session {
   @@map("session")
   @@schema("public")
 }
+/// A one-time passcode challenge issued for phone authentication.
+model OtpChallenge {
+  id         String    @id @default(uuid()) @db.Uuid
+  phoneE164  String    @map("phone_e164")
+  codeHash   String    @map("code_hash")
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([phoneE164])
+  @@map("otp_challenge")
+  @@schema("public")
+}
+
 
 enum SessionClient {
   WEB

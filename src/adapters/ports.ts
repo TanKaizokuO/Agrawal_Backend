@@ -1,12 +1,5 @@
-export interface VerifiedPhoneToken {
-  readonly uid: string;
-  readonly phoneE164: string;
-  readonly authTime: Date;
-  readonly signInProvider: "phone";
-}
-
-export interface PhoneTokenVerifier {
-  verifyIdToken(idToken: string, checkRevoked: true): Promise<VerifiedPhoneToken>;
+export interface SmsSender {
+  sendOtp(phoneE164: string, code: string): Promise<void>;
 }
 
 export interface PushMessage {

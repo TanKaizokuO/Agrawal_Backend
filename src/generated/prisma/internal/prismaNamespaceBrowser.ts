@@ -63,6 +63,7 @@ export const ModelName = {
   Admission: 'Admission',
   GateDevice: 'GateDevice',
   Session: 'Session',
+  OtpChallenge: 'OtpChallenge',
   MemberRole: 'MemberRole',
   Image: 'Image',
   Notice: 'Notice',
@@ -278,6 +279,19 @@ export const SessionScalarFieldEnum = {
 } as const
 
 export type SessionScalarFieldEnum = (typeof SessionScalarFieldEnum)[keyof typeof SessionScalarFieldEnum]
+
+
+export const OtpChallengeScalarFieldEnum = {
+  id: 'id',
+  phoneE164: 'phoneE164',
+  codeHash: 'codeHash',
+  attempts: 'attempts',
+  expiresAt: 'expiresAt',
+  consumedAt: 'consumedAt',
+  createdAt: 'createdAt'
+} as const
+
+export type OtpChallengeScalarFieldEnum = (typeof OtpChallengeScalarFieldEnum)[keyof typeof OtpChallengeScalarFieldEnum]
 
 
 export const MemberRoleScalarFieldEnum = {

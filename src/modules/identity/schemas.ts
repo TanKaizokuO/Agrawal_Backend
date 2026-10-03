@@ -5,21 +5,26 @@ export const PhoneE164 = z.string().regex(/^\+91[6-9]\d{9}$/u);
 export const FamilyPublicId = z.string().regex(/^AGR-[1-9]\d{5}-\d{5}$/u);
 export type SessionClientInput = z.infer<typeof SessionClientSchema>;
 
-const FirebaseSessionRequest = z.object({
-  firebaseIdToken: z.string().trim().min(1),
+export const RequestOtpBody = z.object({
   client: SessionClientSchema,
+  phoneE164: PhoneE164,
 }).strict();
 
-const FixedOtpSessionRequest = z.object({
+export const RequestOtpResponse = z.object({
+  expiresInSeconds: z.literal(300).or(z.number()),
+  resendAfterSeconds: z.literal(30).or(z.number()),
+});
+
+export const SmsOtpAuthenticationSchema = z.object({
+  kind: z.literal("SMS_OTP"),
   phoneE164: PhoneE164,
   otp: z.string().regex(/^\d{6}$/u),
-  client: z.literal("MOBILE"),
 }).strict();
 
-export const CreateSessionBody = z.union([
-  FirebaseSessionRequest,
-  FixedOtpSessionRequest,
-]);
+export const CreateSessionBody = z.object({
+  client: SessionClientSchema,
+  authentication: SmsOtpAuthenticationSchema,
+}).strict();
 
 const PublicApplicantPrincipal = z.object({
   kind: z.literal("APPLICANT"),
@@ -50,6 +55,10 @@ export const SessionResponse = z.object({
   token: z.string().min(1).optional(),
 });
 
+export const AuthOtpRequest = RequestOtpBody;
+export const AuthOtpResponse = RequestOtpResponse;
+export type RequestOtpBodyInput = z.infer<typeof RequestOtpBody>;
+export type CreateSessionBodyInput = z.infer<typeof CreateSessionBody>;
 export const AuthSessionRequest = CreateSessionBody;
 export const AuthSessionResponse = SessionResponse;
 export const MeResponse = PrincipalResponse;

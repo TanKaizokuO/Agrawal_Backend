@@ -106,12 +106,54 @@
         }
       }
     },
+    "/v1/auth/otp": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request an SMS OTP for phone verification",
+        "operationId": "requestAuthOtp",
+        "x-auth": "public",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthOtpRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OTP challenge created and dispatched via SMS.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOtpResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
     "/v1/auth/session": {
       "post": {
         "tags": [
           "Auth"
         ],
-        "summary": "Create an API session from a Firebase phone token or fixed mobile OTP",
+        "summary": "Create an API session from an SMS OTP",
         "operationId": "createAuthSession",
         "x-auth": "public",
         "security": [],
@@ -4944,6 +4986,16 @@
             }
           }
         }
+      },
+      "BadGateway": {
+        "description": "Upstream delivery or gateway failure.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -5037,8 +5089,9 @@
           "IDEMPOTENCY_KEY_REUSED",
           "INTERNAL",
           "UPSTREAM_UNAVAILABLE",
-          "FIREBASE_TOKEN_INVALID",
-          "FIXED_OTP_INVALID",
+          "OTP_INVALID",
+          "OTP_ATTEMPTS_EXCEEDED",
+          "OTP_DELIVERY_FAILED",
           "PHONE_BELONGS_TO_ARCHIVED_MEMBER",
           "SESSION_EXPIRED",
           "PAYMENT_NOT_FOUND",
@@ -5488,59 +5541,81 @@
           }
         }
       },
-      "AuthSessionRequest": {
-        "description": "Supply exactly one supported authentication shape.",
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/FirebaseAuthSessionRequest"
-          },
-          {
-            "$ref": "#/components/schemas/FixedOtpAuthSessionRequest"
-          }
-        ]
-      },
-      "FirebaseAuthSessionRequest": {
+      "AuthOtpRequest": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "firebaseIdToken",
-          "client"
+          "client",
+          "phoneE164"
         ],
         "properties": {
-          "firebaseIdToken": {
-            "type": "string",
-            "minLength": 1
-          },
           "client": {
             "type": "string",
             "enum": [
               "WEB",
               "MOBILE"
             ]
+          },
+          "phoneE164": {
+            "$ref": "#/components/schemas/PhoneE164"
           }
         }
       },
-      "FixedOtpAuthSessionRequest": {
+      "AuthOtpResponse": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "phoneE164",
-          "otp",
-          "client"
+          "expiresInSeconds",
+          "resendAfterSeconds"
         ],
         "properties": {
+          "expiresInSeconds": {
+            "type": "integer"
+          },
+          "resendAfterSeconds": {
+            "type": "integer"
+          }
+        }
+      },
+      "SmsOtpAuthentication": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "phoneE164",
+          "otp"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "SMS_OTP"
+          },
           "phoneE164": {
             "$ref": "#/components/schemas/PhoneE164"
           },
           "otp": {
             "type": "string",
-            "pattern": "^[0-9]{6}$",
-            "const": "123456",
-            "description": "Fixed six-digit code accepted by the server; no SMS is sent."
-          },
+            "pattern": "^\\d{6}$"
+          }
+        }
+      },
+      "AuthSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "client",
+          "authentication"
+        ],
+        "properties": {
           "client": {
             "type": "string",
-            "const": "MOBILE"
+            "enum": [
+              "WEB",
+              "MOBILE"
+            ]
+          },
+          "authentication": {
+            "$ref": "#/components/schemas/SmsOtpAuthentication"
           }
         }
       },
@@ -6759,9 +6834,10 @@
       "ErasureRequestBody": {
         "type": "object",
         "properties": {
-          "firebaseIdToken": {
+          "otp": {
             "type": "string",
-            "description": "Required only when self-service erasure is enabled; must be freshly re-authenticated."
+            "pattern": "^\\d{6}$",
+            "description": "Required only when self-service erasure is enabled; obtain via POST /v1/auth/otp for the member's own phone."
           }
         }
       },

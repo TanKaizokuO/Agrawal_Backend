@@ -409,6 +409,7 @@ export const ModelName = {
   Admission: 'Admission',
   GateDevice: 'GateDevice',
   Session: 'Session',
+  OtpChallenge: 'OtpChallenge',
   MemberRole: 'MemberRole',
   Image: 'Image',
   Notice: 'Notice',
@@ -454,7 +455,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "rateLimitBucket" | "idempotencyRecord" | "bloodSosRequest" | "bloodSosAlert" | "bloodSosResponse" | "donorPreference" | "donorAlertDay" | "event" | "eventPass" | "admission" | "gateDevice" | "session" | "memberRole" | "image" | "notice" | "businessListingMeta" | "archivalRequest" | "report" | "suspension" | "deviceToken" | "pushDelivery" | "pushDeliveryToken" | "processingRecord" | "flag" | "payment" | "refund" | "refundAttempt" | "paymentOrderClaim" | "paymentOutboxJob" | "headAnchor" | "webhookEvent" | "family" | "member" | "familyLink" | "consentEvent" | "erasureRequest" | "officerMessage" | "invite" | "pincodeCache" | "registration" | "familyIdCounter" | "romanizationCache"
+    modelProps: "rateLimitBucket" | "idempotencyRecord" | "bloodSosRequest" | "bloodSosAlert" | "bloodSosResponse" | "donorPreference" | "donorAlertDay" | "event" | "eventPass" | "admission" | "gateDevice" | "session" | "otpChallenge" | "memberRole" | "image" | "notice" | "businessListingMeta" | "archivalRequest" | "report" | "suspension" | "deviceToken" | "pushDelivery" | "pushDeliveryToken" | "processingRecord" | "flag" | "payment" | "refund" | "refundAttempt" | "paymentOrderClaim" | "paymentOutboxJob" | "headAnchor" | "webhookEvent" | "family" | "member" | "familyLink" | "consentEvent" | "erasureRequest" | "officerMessage" | "invite" | "pincodeCache" | "registration" | "familyIdCounter" | "romanizationCache"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1343,6 +1344,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.SessionCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.SessionCountAggregateOutputType> | number
+        }
+      }
+    }
+    OtpChallenge: {
+      payload: Prisma.$OtpChallengePayload<ExtArgs>
+      fields: Prisma.OtpChallengeFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.OtpChallengeFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.OtpChallengeFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>
+        }
+        findFirst: {
+          args: Prisma.OtpChallengeFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.OtpChallengeFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>
+        }
+        findMany: {
+          args: Prisma.OtpChallengeFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>[]
+        }
+        create: {
+          args: Prisma.OtpChallengeCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>
+        }
+        createMany: {
+          args: Prisma.OtpChallengeCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.OtpChallengeCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>[]
+        }
+        delete: {
+          args: Prisma.OtpChallengeDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>
+        }
+        update: {
+          args: Prisma.OtpChallengeUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>
+        }
+        deleteMany: {
+          args: Prisma.OtpChallengeDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.OtpChallengeUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.OtpChallengeUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>[]
+        }
+        upsert: {
+          args: Prisma.OtpChallengeUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$OtpChallengePayload>
+        }
+        aggregate: {
+          args: Prisma.OtpChallengeAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateOtpChallenge>
+        }
+        groupBy: {
+          args: Prisma.OtpChallengeGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.OtpChallengeGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.OtpChallengeCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.OtpChallengeCountAggregateOutputType> | number
         }
       }
     }
@@ -3774,6 +3849,19 @@ export const SessionScalarFieldEnum = {
 export type SessionScalarFieldEnum = (typeof SessionScalarFieldEnum)[keyof typeof SessionScalarFieldEnum]
 
 
+export const OtpChallengeScalarFieldEnum = {
+  id: 'id',
+  phoneE164: 'phoneE164',
+  codeHash: 'codeHash',
+  attempts: 'attempts',
+  expiresAt: 'expiresAt',
+  consumedAt: 'consumedAt',
+  createdAt: 'createdAt'
+} as const
+
+export type OtpChallengeScalarFieldEnum = (typeof OtpChallengeScalarFieldEnum)[keyof typeof OtpChallengeScalarFieldEnum]
+
+
 export const MemberRoleScalarFieldEnum = {
   memberId: 'memberId',
   role: 'role',
@@ -4939,6 +5027,7 @@ export type GlobalOmitConfig = {
   admission?: Prisma.AdmissionOmit
   gateDevice?: Prisma.GateDeviceOmit
   session?: Prisma.SessionOmit
+  otpChallenge?: Prisma.OtpChallengeOmit
   memberRole?: Prisma.MemberRoleOmit
   image?: Prisma.ImageOmit
   notice?: Prisma.NoticeOmit

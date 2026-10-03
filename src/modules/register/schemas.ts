@@ -150,7 +150,7 @@ export const PutFamilyPhotoBody = z.object({
 });
 
 export const PostErasureBody = z.object({
-  firebaseIdToken: z.string().optional(),
+  otp: z.string().regex(/^\d{6}$/u).optional(),
 }).optional();
 
 export const DirectorySearchQuery = z.object({

@@ -90,6 +90,8 @@ jobs:
           REGISTRATION_PAYMENT_PAISE: 100
           BUSINESS_LISTING_FEE_PAISE: 4900
           PAYMENT_IDENTITY_HMAC_KEY: dGVzdC1obWFjLWtleS0zMi1ieXRlcy1sb25nLXZhbHVlCg==
+          SMS_PROVIDER: console
+          OTP_HMAC_KEY: dGVzdC1vdHAtaG1hYy1rZXktMzItYnl0ZXMtbG9uZy12YWx1ZQ==
           IMAGE_SCREENING_ENABLED: false
           WORKERS_ENABLED: false
         run: npm run test

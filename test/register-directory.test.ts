@@ -158,7 +158,6 @@ function createRegisterApp(
   app.use(createRegisterRoutes({
     service,
     erasureSelfServiceEnabled: false,
-    reauthenticate: () => Promise.resolve(false),
   }));
   app.use(errorMiddleware());
   return app;

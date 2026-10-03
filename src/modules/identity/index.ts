@@ -24,7 +24,18 @@ export {
   type SessionPurgeDatabase,
 } from "./jobs.js";
 export {
+  createSmsSender,
+  type SmsSenderConfig,
+  type SmsSenderDeps,
+} from "./sms/index.js";
+
+export {
   CreateSessionBody,
+  RequestOtpBody,
+  RequestOtpResponse,
+  SmsOtpAuthenticationSchema,
+  AuthOtpRequest,
+  AuthOtpResponse,
   AuthSessionRequest,
   AuthSessionResponse,
   MeResponse,
@@ -37,6 +48,8 @@ export {
   PhoneE164,
   type SessionClientInput,
   type SessionResponseBody,
+  type RequestOtpBodyInput,
+  type CreateSessionBodyInput,
 } from "./schemas.js";
 
 export {
@@ -54,14 +67,12 @@ export {
   type SessionClient,
   type SessionDelegate,
   type SessionRow,
+  type OtpChallengeDelegate,
+  type OtpChallengeRow,
 } from "./db.js";
 
-export const IDENTITY_ERROR_CODES = {
-  FIREBASE_TOKEN_INVALID: "FIREBASE_TOKEN_INVALID",
-  FIXED_OTP_INVALID: "FIXED_OTP_INVALID",
-  PHONE_BELONGS_TO_ARCHIVED_MEMBER: "PHONE_BELONGS_TO_ARCHIVED_MEMBER",
-  SESSION_EXPIRED: "SESSION_EXPIRED",
-} as const;
+export {
+  IDENTITY_ERROR_CODES,
+  type IdentityErrorCode,
+} from "./errors.js";
 
-export type IdentityErrorCode =
-  (typeof IDENTITY_ERROR_CODES)[keyof typeof IDENTITY_ERROR_CODES];

@@ -78,6 +78,11 @@ export type GateDevice = Prisma.GateDeviceModel
  */
 export type Session = Prisma.SessionModel
 /**
+ * Model OtpChallenge
+ * A one-time passcode challenge issued for phone authentication.
+ */
+export type OtpChallenge = Prisma.OtpChallengeModel
+/**
  * Model MemberRole
  * A role granted to a Member. Read on every authenticated request.
  */

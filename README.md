@@ -11,7 +11,7 @@ This service owns the single HTTP contract that all client applications (`Agrawa
 | Module | Purpose |
 |---|---|
 | **`identity`** | Member households, Family links, head-of-family anchor, invitations, and Gotra management. |
-| **`registration`** | Self-registration flow, phone verification via Firebase, duplicate detection, and friction fee handling. |
+| **`registration`** | Self-registration flow, phone verification via SMS OTP, duplicate detection, and friction fee handling. |
 | **`blood-sos`** | Emergency blood donor matching ladder (place-based radial matching), request alerts, and privacy-shielded reach reporting. |
 | **`events`** | Community event registration, pass minting, Gate Device verification, and offline admission sync. |
 | **`notices`** | Shok Sandesh (obituaries) with respect periods and general community announcements. |
@@ -30,19 +30,19 @@ This service owns the single HTTP contract that all client applications (`Agrawa
 - **Database & ORM**: PostgreSQL 18 (matches the AWS RDS 18.3 instance, ADR-0029) + Prisma 7 (pg adapter)
 - **Background Jobs**: `pg-boss` queue runner
 - **API Spec & Validation**: Zod v4 schemas + `@asteasolutions/zod-to-openapi` (OpenAPI v3.1)
-- **Authentication**: Firebase Phone Auth for WEB; fixed OTP `123456` for MOBILE, with persistent database-backed bearer sessions (90-day sliding TTL)
+- **Authentication**: Backend SMS OTP via MSG91 Flow API (`POST /v1/auth/otp` and `POST /v1/auth/session`, ADR-0033) for both WEB and MOBILE, with persistent database-backed sessions (HTTP-only cookie for WEB, 90-day sliding bearer TTL for MOBILE)
 - **Testing**: Vitest + Supertest
 
 ---
 
 ## Authentication and rollout
 
-- WEB continues to exchange Firebase Phone Auth ID tokens for secure HTTP-only cookie sessions.
-- MOBILE sends `{ phoneE164, otp: "123456", client: "MOBILE" }` to `POST /v1/auth/session`; no SMS is sent. The API creates an actual PostgreSQL-backed session and returns a bearer token. `/v1/auth/me` restores the principal, and logout revokes the session.
-- Mobile bearer sessions have a 90-day sliding TTL. These are real Applicant or Member sessions, not client-generated credentials.
-- The shared fixed code is deliberately insecure and proves no ownership of the supplied number. Assume every app user can learn it; anyone who knows it can claim any phone number, including an existing Member's. Do not describe this as phone verification. Production release requires explicit Operator acceptance of this risk; replace the fixed code with delivered OTP verification before phone ownership is a security requirement.
-- Deploy the backend support before shipping the Flutter client: older API versions reject the fixed-OTP request shape.
-
+- Both WEB and MOBILE use backend-authoritative SMS OTP delivery via MSG91 Flow API (ADR-0033):
+  1. `POST /v1/auth/otp`: `{ client, phoneE164 }` → generates 6-digit code (TTL 300s, max 5 attempts, 30s resend cooldown, limits 5/hr per phone and 20/hr per IP), hashes with HMAC-SHA256 (`OTP_HMAC_KEY`), stores in `OtpChallenge`, dispatches via MSG91 Flow API. Returns `202 Accepted` with `{ expiresInSeconds: 300, resendAfterSeconds: 30 }`.
+  2. `POST /v1/auth/session`: `{ client, authentication: { kind: "SMS_OTP", phoneE164, otp } }` → verifies OTP, creates session (HTTP-only `sid` cookie for WEB, 90-day sliding bearer token for MOBILE).
+  3. Errors: `OTP_INVALID` 401, `OTP_ATTEMPTS_EXCEEDED` 429, `OTP_DELIVERY_FAILED` 502, `RATE_LIMITED` 429, `VALIDATION_FAILED` 400.
+- Legacy Firebase Phone Auth and the temporary mobile fixed OTP `123456` are removed.
+- Production requires completed Indian DLT PEID registration and MSG91 Flow template approval before live SMS delivery is enabled; local/test runs use `SMS_PROVIDER=console`.
 ---
 
 ## Directory Layout

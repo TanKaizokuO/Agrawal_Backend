@@ -6,7 +6,7 @@ export const logRedaction = {
     "req.headers.cookie",
     'res.headers["set-cookie"]',
     "req.params.token",
-    "*.firebaseIdToken",
+    "*.otp",
     "*.phoneE164",
     "*.vpa",
     "*.dateOfBirth",

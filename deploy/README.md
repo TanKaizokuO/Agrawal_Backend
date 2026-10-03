@@ -36,8 +36,13 @@ Sensitive values are stored as `SecureString` encrypted with KMS.
 - `/agrawal/<env>/DATABASE_URL` (App role credentials)
 - `/agrawal/<env>/DATABASE_MIGRATION_URL` (Owner role credentials for `prisma migrate deploy`)
 - `/agrawal/<env>/WEB_ORIGINS` (required exact origins for CORS and CSRF; no application default)
-- `/agrawal/<env>/FIREBASE_PROJECT_ID`
-- `/agrawal/<env>/FIREBASE_SERVICE_ACCOUNT_JSON`
+- `/agrawal/<env>/FIREBASE_PROJECT_ID` (FCM push notifications)
+- `/agrawal/<env>/FIREBASE_SERVICE_ACCOUNT_JSON` (FCM push notifications)
+- `/agrawal/<env>/SMS_PROVIDER` (`msg91` for production; `console` dev-only)
+- `/agrawal/<env>/MSG91_AUTH_KEY` (MSG91 Flow API credentials)
+- `/agrawal/<env>/MSG91_TEMPLATE_ID` (MSG91 Flow template mapped to DLT template ID)
+- `/agrawal/<env>/MSG91_OTP_VAR` (template OTP variable name, default `otp`)
+- `/agrawal/<env>/OTP_HMAC_KEY` (HMAC-SHA256 key for OTP verification hashes)
 - `/agrawal/<env>/RAZORPAY_KEY_ID`
 - `/agrawal/<env>/RAZORPAY_KEY_SECRET`
 - `/agrawal/<env>/RAZORPAY_WEBHOOK_SECRET`

@@ -9,10 +9,16 @@ Operator Decisions Round 7 (ADR-0026, 21 September 2026) answered this file's fo
 1. ~~The Officer's grievance email address.~~ **Resolved 21 September 2026 (ADR-0027):** the mailbox is `help.agrawal.app@gmail.com`, under the Operator's control. The consent and privacy notices can now publish the channel; the 30-day response SLA stands (ADR-0017).
 2. **The Google Cloud project** for `romanizeText`. A GCP project with the Cloud Translation API enabled, a service account key, and billing. Needed by M2.
 3. **UPI VPA availability on production** — Razorpay's docs do not promise `vpa` is always present and unmasked for UPI Intent / QR payments. M5's done-when says: if `vpa` is absent on the first real ₹1 payment, record that fact here. The answer determines how many founding registrations get flagged as `NO_PAYMENT_IDENTITY` versus how many are silently anchored.
+4. **Indian DLT registration and MSG91 Flow setup (ADR-0033).** Production SMS OTP delivery is blocked until the Operator completes:
+   - **DLT Entity (PEID) registration:** Register on an Indian telecom DLT portal (e.g., Jio, Airtel, VilPower; ~₹5,900 one-time fee).
+   - **Sender header (Header ID):** Approved 6-character sender header (e.g., `AGRWAL`).
+   - **Content template:** Registered transactional OTP template containing a code variable (e.g., `Your Agrawal Samaj verification code is {#var#}. Valid for 5 minutes.`).
+   - **MSG91 Flow template:** Map approved DLT PEID and template ID to an MSG91 Flow template.
+   - **AWS Secrets Manager:** Populate `SMS_PROVIDER=msg91`, `MSG91_AUTH_KEY`, `MSG91_TEMPLATE_ID`, `MSG91_OTP_VAR`, and `OTP_HMAC_KEY` in `prod/agrawal/env`. Until completed, production cannot deliver OTPs (`SMS_PROVIDER=console` is local/dev-only).
 
 ## Design items still open
 
-4. **`feature-list.md` re-sign.** It still lists directory lookup and AI photo screening under Stage 1 (moved by ADR-0022), and the 25/50/100 km radius ladder under §2.5 (replaced by ADR-0025). ADR-0026 adds a third divergence: the Stage 1 brief's "Agarwal Samaj" spelling mandate is superseded — the community's Latin name is "Agrawal" (ADR-0026 §4). Either edit the list and have the Operator re-sign, or leave it and have the ADRs prevail.
+5. **`feature-list.md` re-sign.** It still lists directory lookup and AI photo screening under Stage 1 (moved by ADR-0022), and the 25/50/100 km radius ladder under §2.5 (replaced by ADR-0025). ADR-0026 adds a third divergence: the Stage 1 brief's "Agarwal Samaj" spelling mandate is superseded — the community's Latin name is "Agrawal" (ADR-0026 §4). Either edit the list and have the Operator re-sign, or leave it and have the ADRs prevail.
 
 ## Resolved by Operator Decisions Round 7 (ADR-0026, 21 September 2026)
 

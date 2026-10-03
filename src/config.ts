@@ -69,6 +69,30 @@ const paymentIdentityHmacKey = requiredText.superRefine((value, context) => {
   }
 });
 
+const otpHmacKey = requiredText.superRefine((value, context) => {
+  try {
+    const base64Regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+    if (!base64Regex.test(value.trim())) {
+      context.addIssue({ code: "custom", message: "must be valid base64" });
+      return;
+    }
+    const bytes = Buffer.from(value.trim(), "base64");
+    if (bytes.length < 32) {
+      context.addIssue({
+        code: "custom",
+        message: "must be base64 encoding of at least 32 bytes",
+      });
+    }
+  } catch {
+    context.addIssue({ code: "custom", message: "must be valid base64" });
+  }
+});
+
+const smsProviderValue = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() !== "" ? value.trim().toLowerCase() : undefined),
+  z.enum(["msg91", "console"]).default("console"),
+);
+
 export const configSchema = z.object({
   nodeEnv: z.enum(["development", "test", "production"]),
   appEnv: z.enum(["local", "staging", "production"]),
@@ -122,6 +146,11 @@ export const configSchema = z.object({
   donorCooldownDays: nonNegativeInteger.default(90),
   donorDailyAlertCap: nonNegativeInteger.default(3),
   workersEnabled: booleanValue.default(true),
+  smsProvider: smsProviderValue,
+  msg91AuthKey: requiredText.optional(),
+  msg91TemplateId: requiredText.optional(),
+  msg91OtpVar: requiredText.default("otp"),
+  otpHmacKey,
 });
 
 export type Config = z.output<typeof configSchema>;
@@ -195,6 +224,11 @@ const ENV_NAME_BY_FIELD: Record<keyof typeof configSchema.shape, string> = {
   donorCooldownDays: "DONOR_COOLDOWN_DAYS",
   donorDailyAlertCap: "DONOR_DAILY_ALERT_CAP",
   workersEnabled: "WORKERS_ENABLED",
+  smsProvider: "SMS_PROVIDER",
+  msg91AuthKey: "MSG91_AUTH_KEY",
+  msg91TemplateId: "MSG91_TEMPLATE_ID",
+  msg91OtpVar: "MSG91_OTP_VAR",
+  otpHmacKey: "OTP_HMAC_KEY",
 };
 
 function toRecord(environment: NodeJS.ProcessEnv): Record<string, unknown> {
@@ -234,6 +268,43 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Config
       issues.push({
         variable: "SIGHTENGINE_API_SECRET",
         message: "is required when IMAGE_SCREENING_ENABLED=true",
+      });
+    }
+  }
+
+  const isProduction =
+    (parsed.success
+      ? parsed.data.nodeEnv
+      : environment.NODE_ENV?.trim().toLowerCase()) === "production";
+  const provider =
+    parsed.success
+      ? parsed.data.smsProvider
+      : (environment.SMS_PROVIDER?.trim().toLowerCase() || "console");
+
+  if (isProduction && provider === "console") {
+    issues.push({
+      variable: "SMS_PROVIDER",
+      message: "console SMS provider is not permitted in production",
+    });
+  }
+
+  if (isProduction || provider === "msg91") {
+    const authKey = environment.MSG91_AUTH_KEY?.trim();
+    if (authKey === undefined || authKey === "") {
+      issues.push({
+        variable: "MSG91_AUTH_KEY",
+        message: isProduction
+          ? "is required in production"
+          : "is required when SMS_PROVIDER=msg91",
+      });
+    }
+    const templateId = environment.MSG91_TEMPLATE_ID?.trim();
+    if (templateId === undefined || templateId === "") {
+      issues.push({
+        variable: "MSG91_TEMPLATE_ID",
+        message: isProduction
+          ? "is required in production"
+          : "is required when SMS_PROVIDER=msg91",
       });
     }
   }

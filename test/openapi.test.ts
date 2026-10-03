@@ -15,8 +15,8 @@ describe("server OpenAPI coverage", () => {
     const second = generateServerOpenApiDocument();
 
     assertOpenApiCoverage(first, frozen);
-    expect(Object.keys(first.paths ?? {})).toHaveLength(83);
-    expect(runtimeOperations).toHaveLength(95);
+    expect(Object.keys(first.paths ?? {})).toHaveLength(84);
+    expect(runtimeOperations).toHaveLength(96);
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
 

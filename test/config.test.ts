@@ -13,6 +13,7 @@ function validEnvironment(): NodeJS.ProcessEnv {
     RAZORPAY_KEY_SECRET: "key-secret",
     RAZORPAY_WEBHOOK_SECRET: "webhook-secret",
     PAYMENT_IDENTITY_HMAC_KEY: Buffer.alloc(32, 1).toString("base64"),
+    OTP_HMAC_KEY: Buffer.alloc(32, 2).toString("base64"),
     S3_BUCKET: "bucket",
     GOOGLE_CLOUD_PROJECT: "project",
     GOOGLE_APPLICATION_CREDENTIALS_JSON: "{}",

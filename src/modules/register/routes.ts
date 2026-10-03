@@ -16,6 +16,7 @@ import {
   PutPhotoBody,
 } from "./schemas.js";
 import type { RegisterService } from "./service.js";
+import type { IdentityService } from "../identity/index.js";
 import {
   defineRouteManifest,
   registerRoute,
@@ -43,7 +44,7 @@ export interface RegisterRouteDeps {
   readonly service: RegisterService;
   readonly webBaseUrl?: string;
   readonly erasureSelfServiceEnabled: boolean;
-  readonly reauthenticate: (memberId: string, firebaseIdToken: string) => Promise<boolean>;
+  readonly identityService?: Pick<IdentityService, "verifyAndConsumeOtp"> | undefined;
 }
 
 function memberIdFromRequest(request: Request): string {
@@ -51,6 +52,14 @@ function memberIdFromRequest(request: Request): string {
   if (principal?.kind !== "MEMBER") throw new AppError("UNAUTHENTICATED", 401);
   return principal.memberId;
 }
+function memberPhoneFromRequest(request: Request): string {
+  const principal = request.principal;
+  if (principal?.kind !== "MEMBER" || !principal.phoneE164) {
+    throw new AppError("UNAUTHENTICATED", 401);
+  }
+  return principal.phoneE164;
+}
+
 
 function memberRolesFromRequest(request: Request): readonly string[] {
   const principal = request.principal;
@@ -131,12 +140,14 @@ export function createRegisterRoutes(deps: RegisterRouteDeps): Router {
       const memberId = memberIdFromRequest(request);
       const body = PostErasureBody.parse(request.body) ?? {};
       if (deps.erasureSelfServiceEnabled) {
-        if (
-          body.firebaseIdToken === undefined
-          || !(await deps.reauthenticate(memberId, body.firebaseIdToken))
-        ) {
-          throw new AppError("REAUTH_REQUIRED", 401);
+        if (body.otp === undefined) {
+          throw new AppError("VALIDATION_FAILED", 400);
         }
+        const phoneE164 = memberPhoneFromRequest(request);
+        if (!deps.identityService) {
+          throw new AppError("INTERNAL_ERROR", 500);
+        }
+        await deps.identityService.verifyAndConsumeOtp(phoneE164, body.otp);
         await deps.service.withTransaction((tx) => deps.service.eraseMember(tx, memberId, { kind: "SELF" }));
         response.clearCookie("sid");
         response.status(200).json({ status: "ERASED" });

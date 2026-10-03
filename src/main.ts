@@ -21,7 +21,6 @@ import {
   type FirebaseEnvironment,
 } from "./adapters/fcm.js";
 import {
-  createFirebasePhoneVerifier,
   normalizedFirebaseServiceAccountJson,
 } from "./adapters/firebase-runtime.js";
 import { createImageScreener } from "./adapters/image-screener.js";
@@ -51,6 +50,7 @@ import {
   IdentityService,
   createIdentityRoutes,
   createIdentityWorkers,
+  createSmsSender,
   type IdentityTxClient,
 } from "./modules/identity/index.js";
 import {
@@ -220,11 +220,6 @@ export function createApiRuntime(
       apiSecret: requiredConfigText(config.sightengineApiSecret, "SIGHTENGINE_API_SECRET"),
     })
     : undefined;
-  const firebaseVerifier = createFirebasePhoneVerifier({
-    projectId: config.firebaseProjectId,
-    serviceAccountJson: config.firebaseServiceAccountJson,
-    environment: firebaseEnvironment(config),
-  });
   const pushSender = createFirebaseAdminPushSender({
     projectId: config.firebaseProjectId,
     serviceAccountJson: normalizedFirebaseServiceAccountJson(config.firebaseServiceAccountJson),
@@ -351,9 +346,11 @@ export function createApiRuntime(
   });
   deferred.media = mediaService;
 
+  const smsSender = createSmsSender(config, { logger });
+
   const identityService = new IdentityService({
+    smsSender,
     db: database,
-    verifier: firebaseVerifier,
     registration: registrationPort(() => {
       if (deferred.registration === undefined) {
         throw new Error("Registration service is not initialized");
@@ -365,6 +362,7 @@ export function createApiRuntime(
     config: {
       sessionTtlWebDays: config.sessionTtlWebDays,
       sessionTtlMobileDays: config.sessionTtlMobileDays,
+      otpHmacKey: config.otpHmacKey,
     },
     rateLimitStore,
     processingRecord,
@@ -567,19 +565,7 @@ export function createApiRuntime(
     const registerRouteDeps = {
       service: registerService,
       erasureSelfServiceEnabled: config.erasureSelfServiceEnabled,
-      reauthenticate: async (memberId: string, firebaseIdToken: string) => {
-        try {
-          const verified = await firebaseVerifier.verifyIdToken(firebaseIdToken, true);
-          const member = await database.member.findUnique({
-            where: { id: memberId },
-            select: { phoneE164: true },
-          });
-          return member?.phoneE164 === verified.phoneE164
-            && clock.now().getTime() - verified.authTime.getTime() <= 5 * 60_000;
-        } catch {
-          return false;
-        }
-      },
+      identityService,
       ...(config.webOrigins[0] === undefined ? {} : { webBaseUrl: config.webOrigins[0] }),
     };
     app.use(createRegisterRoutes(registerRouteDeps));
